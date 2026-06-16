@@ -7,12 +7,10 @@
 
 环境变量:
     默认必剪 ASR 免费免配置。
-    SILICONFLOW_API_KEY 仅在使用 --asr-provider siliconflow 时需要。
 
 设计要点:
 - 纯标准库,无第三方依赖
 - 默认调用必剪 BcutASR 云端接口,免注册免 key
-- 保留硅基流动 SenseVoice 兼容路径,可用 --asr-provider siliconflow 手动启用
 """
 
 from __future__ import annotations
@@ -20,7 +18,14 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import difflib
-import getpass
+import re
+
+try:
+    import jieba
+    _JIEBA_AVAILABLE = True
+except ImportError:
+    jieba = None  # type: ignore[assignment]
+    _JIEBA_AVAILABLE = False
 import hashlib
 import hmac
 import html as html_lib
@@ -44,7 +49,6 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-API_ENDPOINT = "https://api.siliconflow.cn/v1/audio/transcriptions"
 BCUT_API_BASE_URL = "https://member.bilibili.com/x/bcut/rubick-interface"
 BCUT_API_REQ_UPLOAD = BCUT_API_BASE_URL + "/resource/create"
 BCUT_API_COMMIT_UPLOAD = BCUT_API_BASE_URL + "/resource/create/complete"
@@ -52,11 +56,9 @@ BCUT_API_CREATE_TASK = BCUT_API_BASE_URL + "/task"
 BCUT_API_QUERY_RESULT = BCUT_API_BASE_URL + "/task/result"
 JIANYING_SIGN_URL = "https://asrtools-update.bkfeng.top/sign"
 JIANYING_API_BASE_URL = "https://lv-pc-api-sinfonlinec.ulikecam.com"
-DEFAULT_MODEL = "FunAudioLLM/SenseVoiceSmall"  # 中文最快最准的免费选择
-ASR_PROVIDERS = ("bcut", "jianying", "siliconflow")
+ASR_PROVIDERS = ("bcut", "jianying")
 DEFAULT_ASR_PROVIDER = "bcut"
 DEFAULT_SEGMENT_SECONDS = 30
-DEFAULT_WORKERS = 5
 DEFAULT_FREE_ASR_CHUNK_MINUTES = 10
 DEFAULT_FREE_ASR_OVERLAP_SECONDS = 10
 DEFAULT_FREE_ASR_WORKERS = 3
@@ -65,11 +67,7 @@ SUMMARY_MODES = ("brief", "deep", "product", "investment", "obsidian")
 
 CONFIG_TEMPLATE = {
     "asr_provider": DEFAULT_ASR_PROVIDER,
-    "siliconflow_api_key": "sk-替换成你的硅基流动APIKey",
-    "model": DEFAULT_MODEL,
-    "api_endpoint": API_ENDPOINT,
     "segment_seconds": DEFAULT_SEGMENT_SECONDS,
-    "workers": DEFAULT_WORKERS,
     "free_asr_chunk_minutes": DEFAULT_FREE_ASR_CHUNK_MINUTES,
     "free_asr_overlap_seconds": DEFAULT_FREE_ASR_OVERLAP_SECONDS,
     "free_asr_workers": DEFAULT_FREE_ASR_WORKERS,
@@ -137,11 +135,7 @@ def sanitize_filename(name: str) -> str:
 @dataclass(frozen=True)
 class Settings:
     asr_provider: str
-    api_key: str | None
-    api_endpoint: str
-    model: str
     segment_seconds: int
-    workers: int
     free_asr_chunk_minutes: int
     free_asr_overlap_seconds: int
     free_asr_workers: int
@@ -163,17 +157,6 @@ class TranscribeResult:
     segments: list[tuple[float, float, str]]
     transcript_text: str
     model: str
-
-def is_placeholder_api_key(api_key: str | None) -> bool:
-    if not api_key:
-        return True
-    lowered = api_key.strip().lower()
-    return (
-        lowered in {"sk-", "sk-xxx", "sk-your-api-key"}
-        or "替换" in api_key
-        or "你的" in api_key
-        or "your" in lowered
-    )
 
 def default_config_candidates() -> list[Path]:
     """配置文件默认从当前目录和脚本目录查找。"""
@@ -228,25 +211,11 @@ def init_config(path: str | None, *, force: bool = False) -> int:
     """交互式生成 config.json。"""
     output = config_output_path(path)
     if output.exists() and not force:
-        try:
-            existing = json.loads(output.read_text(encoding="utf-8"))
-        except Exception:
-            existing = {}
-        key_status = "占位符" if is_placeholder_api_key(existing.get("siliconflow_api_key")) else "已填写"
-        log(f"⚠️  配置文件已存在: {output.resolve()} ({key_status})")
+        log(f"⚠️  配置文件已存在: {output.resolve()}")
         log("   如需覆盖,请加 --force")
         return 1
 
     data = dict(CONFIG_TEMPLATE)
-    log("默认使用必剪免费 ASR,转录不需要 API Key。")
-    log("如需使用旧硅基流动转录,可在这里填写 SiliconFlow API Key；留空也可以。")
-    try:
-        api_key = getpass.getpass("SiliconFlow API Key: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        log("\n❌ 已取消")
-        return 1
-    if api_key:
-        data["siliconflow_api_key"] = api_key
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -254,8 +223,6 @@ def init_config(path: str | None, *, force: bool = False) -> int:
         encoding="utf-8",
     )
     log(f"✅ 已生成配置: {output.resolve()}")
-    if is_placeholder_api_key(data["siliconflow_api_key"]):
-        log("ℹ️  当前 API Key 仍是占位符；默认必剪 ASR 可直接转录,只有硅基流动转录才需要真实 key。")
     return 0
 
 def to_int(value, name: str) -> int:
@@ -283,31 +250,34 @@ def normalize_asr_provider(value: str | None) -> str:
         "bilibili": "bcut",
         "capcut": "jianying",
         "jian-ying": "jianying",
-        "silicon": "siliconflow",
-        "sensevoice": "siliconflow",
     }
     provider = aliases.get(provider, provider)
     if provider not in ASR_PROVIDERS:
         raise ValueError(f"asr_provider 必须是 {', '.join(ASR_PROVIDERS)} 之一: {value!r}")
     return provider
 
+def credential_errors(settings: Settings) -> list[str]:
+    """检查凭据是否齐全。免费 provider 无需凭据。"""
+    errors: list[str] = []
+    if settings.asr_provider in ("bcut", "jianying"):
+        return errors
+    # 付费 provider 检查 API key
+    env_map = {"openai": "OPENAI_API_KEY", "groq": "GROQ_API_KEY", "deepgram": "DEEPGRAM_API_KEY"}
+    env_var = env_map.get(settings.asr_provider)
+    if env_var and not os.getenv(env_var):
+        errors.append(f"ASR provider '{settings.asr_provider}' 需要设置环境变量 {env_var}")
+    return errors
+
+
 def build_settings(args: argparse.Namespace, config: dict) -> Settings:
     """命令行参数优先,其次配置文件,最后环境变量或内置默认值。"""
     asr_provider = normalize_asr_provider(
         getattr(args, "asr_provider", None) or config_get(config, "asr_provider", "asr", default=DEFAULT_ASR_PROVIDER)
     )
-    file_api_key = config_get(config, "siliconflow_api_key", "api_key")
-    env_api_key = os.environ.get("SILICONFLOW_API_KEY") or os.environ.get("SILICON_API_KEY")
-    api_key = env_api_key if is_placeholder_api_key(file_api_key) and env_api_key else file_api_key or env_api_key
     segment_seconds = (
         args.segment_seconds
         if args.segment_seconds is not None
         else to_int(config_get(config, "segment_seconds", default=DEFAULT_SEGMENT_SECONDS), "segment_seconds")
-    )
-    workers = (
-        args.workers
-        if args.workers is not None
-        else to_int(config_get(config, "workers", default=DEFAULT_WORKERS), "workers")
     )
     free_asr_chunk_minutes = (
         args.free_asr_chunk_minutes
@@ -337,8 +307,6 @@ def build_settings(args: argparse.Namespace, config: dict) -> Settings:
     )
     if segment_seconds <= 0:
         raise ValueError("segment_seconds 必须大于 0")
-    if workers <= 0:
-        raise ValueError("workers 必须大于 0")
     if free_asr_chunk_minutes <= 0:
         raise ValueError("free_asr_chunk_minutes 必须大于 0")
     if free_asr_overlap_seconds < 0:
@@ -350,11 +318,7 @@ def build_settings(args: argparse.Namespace, config: dict) -> Settings:
 
     return Settings(
         asr_provider=asr_provider,
-        api_key=api_key,
-        api_endpoint=args.api_endpoint or config_get(config, "api_endpoint", default=API_ENDPOINT),
-        model=args.model or config_get(config, "model", default=DEFAULT_MODEL),
         segment_seconds=segment_seconds,
-        workers=workers,
         free_asr_chunk_minutes=free_asr_chunk_minutes,
         free_asr_overlap_seconds=free_asr_overlap_seconds,
         free_asr_workers=free_asr_workers,
@@ -433,11 +397,6 @@ def parse_episode(html: str) -> EpisodeMeta:
 # Step 1.5: 启动前自检
 # ============================================================
 
-def api_models_url(api_endpoint: str) -> str:
-    if "/v1/" in api_endpoint:
-        return api_endpoint.split("/v1/", 1)[0].rstrip("/") + "/v1/models"
-    return "https://api.siliconflow.cn/v1/models"
-
 def check_command(command: str) -> str | None:
     path = shutil.which(command)
     if not path:
@@ -447,37 +406,6 @@ def check_command(command: str) -> str | None:
     except Exception as e:
         return f"{command} 无法运行: {e}"
     return None
-
-def check_openai_compatible_api(api_endpoint: str, api_key: str | None, label: str) -> tuple[bool, str]:
-    """检查 OpenAI 兼容 API 域名可达和 key 是否明显有效。"""
-    req = urllib.request.Request(
-        api_models_url(api_endpoint),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": "Mozilla/5.0",
-        },
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if 200 <= resp.status < 300:
-                return True, f"{label} API 可访问,key 已通过 /v1/models 验证。"
-            return False, f"{label} API 返回异常状态码: HTTP {resp.status}"
-    except urllib.error.HTTPError as e:
-        if e.code in {401, 403}:
-            return False, f"{label} API Key 无效或无权限: HTTP {e.code}"
-        return True, f"{label} API 可访问,但 /v1/models 返回 HTTP {e.code}; 将在请求时继续验证。"
-    except Exception as e:
-        return False, f"无法访问 {label} API: {e}"
-
-def check_siliconflow(settings: Settings) -> tuple[bool, str]:
-    return check_openai_compatible_api(settings.api_endpoint, settings.api_key, "硅基流动转录")
-
-def credential_errors(settings: Settings) -> list[str]:
-    errors: list[str] = []
-    if settings.asr_provider == "siliconflow" and is_placeholder_api_key(settings.api_key):
-        errors.append("使用 --asr-provider siliconflow 时需要 siliconflow_api_key 或 SILICONFLOW_API_KEY。")
-    return errors
 
 def run_preflight(
     settings: Settings,
@@ -491,20 +419,10 @@ def run_preflight(
 
     if config_path:
         log(f"   ✓ config.json: {config_path.resolve()}")
-    elif os.environ.get("SILICONFLOW_API_KEY") or os.environ.get("SILICON_API_KEY"):
-        log("   ✓ config.json 未找到,将使用环境变量里的 API Key")
     else:
-        log("   ✓ config.json/API Key: 默认免费 ASR 不需要配置")
+        log("   ✓ config.json: 未找到也可运行，默认免费 ASR 不需要额外配置")
 
-    errors.extend(credential_errors(settings))
-
-    if settings.asr_provider == "siliconflow":
-        if is_placeholder_api_key(settings.api_key):
-            pass
-        else:
-            log("   ✓ 硅基流动转录 API Key: 已填写")
-    else:
-        log(f"   ✓ ASR: {settings.asr_provider} 免费免配置")
+    log(f"   ✓ ASR: {settings.asr_provider} 免费免配置")
 
     for command in ("ffmpeg", "ffprobe"):
         err = check_command(command)
@@ -512,13 +430,6 @@ def run_preflight(
             errors.append(err)
         else:
             log(f"   ✓ {command}: 可用")
-
-    if settings.asr_provider == "siliconflow" and not is_placeholder_api_key(settings.api_key):
-        ok, message = check_siliconflow(settings)
-        if ok:
-            log(f"   ✓ {message}")
-        else:
-            errors.append(message)
 
     if summary_mode:
         log("   ✓ 摘要: 由本地 Agent 基于全文生成,脚本不自动总结")
@@ -612,78 +523,8 @@ def slice_by_duration(
     return chunks
 
 # ============================================================
-# Step 3: 调硅基流动转录 API
+# Step 3: 调云端 ASR API
 # ============================================================
-
-def transcribe_chunk(
-    chunk: Chunk,
-    api_key: str,
-    api_endpoint: str,
-    model: str,
-    attempt: int = 1,
-) -> str:
-    """上传一个 chunk,返回纯文本"""
-    boundary = f"----xyz{uuid.uuid4().hex}"
-    body = build_multipart(
-        boundary,
-        file_path=chunk.path,
-        fields={"model": model},
-    )
-    req = urllib.request.Request(
-        api_endpoint,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        },
-        method="POST",
-    )
-
-    MAX_ATTEMPTS = 5
-    try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", errors="ignore")
-        if e.code == 429 and attempt < MAX_ATTEMPTS:
-            log(f"   ⏳ 429 速率限制,等待 30 秒后重试 (第 {attempt} 次)...")
-            time.sleep(30)
-            return transcribe_chunk(chunk, api_key, api_endpoint, model, attempt + 1)
-        if 500 <= e.code < 600 and attempt < MAX_ATTEMPTS:
-            wait = min(2 ** attempt, 30)
-            log(f"   ⚠️ HTTP {e.code},{wait} 秒后重试 (第 {attempt} 次)...")
-            time.sleep(wait)
-            return transcribe_chunk(chunk, api_key, api_endpoint, model, attempt + 1)
-        raise RuntimeError(
-            f"硅基流动 API 错误 HTTP {e.code}:\n{err_body[:500]}"
-        ) from None
-    except (urllib.error.URLError, TimeoutError) as e:
-        if attempt < MAX_ATTEMPTS:
-            wait = min(2 ** attempt, 30)
-            log(f"   ⚠️ 网络错误 {e},{wait} 秒后重试 (第 {attempt} 次)...")
-            time.sleep(wait)
-            return transcribe_chunk(chunk, api_key, api_endpoint, model, attempt + 1)
-        raise
-
-    # 硅基流动返回的是 OpenAI 兼容格式: {"text": "..."}
-    return (data.get("text") or "").strip()
-
-def build_multipart(boundary: str, file_path: Path, fields: dict) -> bytes:
-    """手搓 multipart/form-data,避免引入 requests"""
-    parts: list[bytes] = []
-    boundary_b = boundary.encode()
-    for key, value in fields.items():
-        parts.append(b"--" + boundary_b + b"\r\n")
-        parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode())
-        parts.append(str(value).encode() + b"\r\n")
-    parts.append(b"--" + boundary_b + b"\r\n")
-    parts.append(
-        f'Content-Disposition: form-data; name="file"; filename="{file_path.name}"\r\n'.encode()
-    )
-    parts.append(b"Content-Type: audio/mpeg\r\n\r\n")
-    parts.append(file_path.read_bytes())
-    parts.append(b"\r\n--" + boundary_b + b"--\r\n")
-    return b"".join(parts)
 
 def http_request(
     url: str,
@@ -987,7 +828,7 @@ def transcribe_with_bcut(audio_path: Path, label: str | None = None) -> list[tup
             log(f"   等待识别结果... {poll}s")
         time.sleep(1)
 
-    raise RuntimeError("必剪 ASR 等待超时。可稍后重试,或改用 --asr-provider jianying/siliconflow。")
+    raise RuntimeError("必剪 ASR 等待超时。可稍后重试,或改用 --asr-provider jianying。")
 
 def transcribe_with_bcut_chunked(
     settings: Settings,
@@ -1054,7 +895,7 @@ def jianying_sign(path: str, tdid: str) -> tuple[str, str]:
             "tdid": tdid,
         },
         headers={
-            "User-Agent": "PodScribe/1.0",
+            "User-Agent": "podcast-bridge/1.0",
             "tdid": tdid,
             "t": current_time,
         },
@@ -1241,37 +1082,7 @@ def transcribe_with_jianying(audio_path: Path, duration: float) -> list[tuple[fl
             log(f"   等待剪映识别结果... {poll * 2}s")
         time.sleep(2)
 
-    raise RuntimeError("剪映 ASR 等待超时。可稍后重试,或改用 --asr-provider bcut/siliconflow。")
-
-def transcribe_with_siliconflow(
-    settings: Settings,
-    mono_path: Path,
-    duration: float,
-    workdir: Path,
-) -> list[tuple[float, float, str]]:
-    if is_placeholder_api_key(settings.api_key):
-        raise RuntimeError("硅基流动转录需要 siliconflow_api_key 或 SILICONFLOW_API_KEY。")
-    t3 = time.time()
-    chunks = slice_by_duration(mono_path, duration, settings.segment_seconds, workdir)
-    log(f"   ⏱ 切片耗时: {time.time() - t3:.1f}s")
-
-    log(f"🎙️  调用硅基流动 ({settings.model}),并发数 {settings.workers}...")
-    maybe_segments: list[tuple[float, float, str] | None] = [None] * len(chunks)
-
-    def transcribe_one(idx_chunk):
-        i, chunk = idx_chunk
-        log(f"   段 {i+1}/{len(chunks)} [{format_timestamp(chunk.offset)}]... ", end="")
-        text = transcribe_chunk(chunk, settings.api_key or "", settings.api_endpoint, settings.model)
-        log(f"✓ ({len(text)} 字)")
-        return i, chunk, text
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=settings.workers) as executor:
-        futures = {executor.submit(transcribe_one, (i, chunk)): i for i, chunk in enumerate(chunks)}
-        for future in concurrent.futures.as_completed(futures):
-            i, chunk, text = future.result()
-            maybe_segments[i] = (chunk.offset, chunk.offset + chunk.duration, text)
-
-    return [segment for segment in maybe_segments if segment is not None]
+    raise RuntimeError("剪映 ASR 等待超时。可稍后重试,或改用 --asr-provider bcut。")
 
 def transcribe_with_provider(
     settings: Settings,
@@ -1283,13 +1094,9 @@ def transcribe_with_provider(
         return transcribe_with_bcut_chunked(settings, mono_path, duration, workdir)
     if settings.asr_provider == "jianying":
         return transcribe_with_jianying(mono_path, duration)
-    if settings.asr_provider == "siliconflow":
-        return transcribe_with_siliconflow(settings, mono_path, duration, workdir)
     raise RuntimeError(f"未知 ASR provider: {settings.asr_provider}")
 
 def provider_display_name(settings: Settings) -> str:
-    if settings.asr_provider == "siliconflow":
-        return settings.model
     if settings.asr_provider == "bcut":
         return "BcutASR (必剪)"
     if settings.asr_provider == "jianying":
@@ -1651,6 +1458,29 @@ def ensure_library_schema(conn: sqlite3.Connection) -> None:
         log(f"⚠️  SQLite FTS5 不可用,将使用普通文本搜索: {e}")
     conn.commit()
 
+def _segment_chinese(text: str) -> str:
+    """用 jieba 分词后空格拼接，让 FTS5 能索引中文词。
+
+    非中文片段（英文/数字/标点）保持原样。
+    """
+    if not text or not _JIEBA_AVAILABLE:
+        return text or ""
+
+    # 按中文/非中文边界切分，非中文部分原样保留，中文部分分词
+    parts: list[str] = []
+    # 匹配连续中文或连续非中文
+    for chunk in re.split(r"([一-鿿㐀-䶿]+)", text):
+        if not chunk:
+            continue
+        if re.match(r"[一-鿿㐀-䶿]", chunk[0]):
+            # 中文片段：jieba 分词后用空格连接
+            words = jieba.cut(chunk)
+            parts.append(" ".join(words))
+        else:
+            parts.append(chunk)
+    return "".join(parts)
+
+
 def upsert_episode_fts(
     conn: sqlite3.Connection,
     episode_id: int,
@@ -1662,7 +1492,12 @@ def upsert_episode_fts(
         conn.execute("DELETE FROM episode_fts WHERE rowid = ?", (episode_id,))
         conn.execute(
             "INSERT INTO episode_fts(rowid, title, description, transcript) VALUES (?, ?, ?, ?)",
-            (episode_id, title, description, transcript_text),
+            (
+                episode_id,
+                _segment_chinese(title),
+                _segment_chinese(description),
+                _segment_chinese(transcript_text),
+            ),
         )
     except sqlite3.OperationalError:
         return
@@ -1671,7 +1506,7 @@ def fetch_text(url: str, *, timeout: int = 30) -> str:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (compatible; PodScribe/1.0)",
+            "User-Agent": "Mozilla/5.0 (compatible; podcast-bridge/1.0)",
             "Accept": "application/rss+xml, application/xml, text/xml, */*",
         },
     )
@@ -2170,7 +2005,7 @@ def _load_feeds_catalog(feeds_dir: Path) -> list[dict]:
 def rss_browse_feeds(args: argparse.Namespace, config: dict, config_path: Path | None = None) -> int:
     """列出 feeds 目录下所有播客,按分类展示,标注已订阅/未订阅状态."""
     script_dir = Path(__file__).resolve().parent
-    feeds_dir = Path(args.feeds_dir) if args.feeds_dir else script_dir / "podscribe-feeds"
+    feeds_dir = Path(args.feeds_dir) if args.feeds_dir else script_dir / "podcast-bridge-feeds"
 
     if not feeds_dir.is_dir():
         print(f"未找到 feeds 目录: {feeds_dir}")
@@ -2222,7 +2057,7 @@ def rss_browse_feeds(args: argparse.Namespace, config: dict, config_path: Path |
 def rss_add_from_feeds(args: argparse.Namespace, config: dict, config_path: Path | None = None) -> int:
     """从 feeds 目录中按名字挑选播客,加入订阅并同步."""
     script_dir = Path(__file__).resolve().parent
-    feeds_dir = Path(args.feeds_dir) if args.feeds_dir else script_dir / "podscribe-feeds"
+    feeds_dir = Path(args.feeds_dir) if args.feeds_dir else script_dir / "podcast-bridge-feeds"
 
     if not feeds_dir.is_dir():
         print(f"未找到 feeds 目录: {feeds_dir}")
@@ -2297,10 +2132,10 @@ def rss_add_from_feeds(args: argparse.Namespace, config: dict, config_path: Path
 
 
 def rss_sync_feeds(args: argparse.Namespace, config: dict, config_path: Path | None = None) -> int:
-    """扫描 podscribe-feeds/*.json,批量添加未入库的播客并同步。需要 --all 或 --category 指定范围。"""
+    """扫描 podcast-bridge-feeds/*.json,批量添加未入库的播客并同步。需要 --all 或 --category 指定范围。"""
     # 确定 feeds 目录位置
     script_dir = Path(__file__).resolve().parent
-    feeds_dir = Path(args.feeds_dir) if args.feeds_dir else script_dir / "podscribe-feeds"
+    feeds_dir = Path(args.feeds_dir) if args.feeds_dir else script_dir / "podcast-bridge-feeds"
 
     if not feeds_dir.is_dir():
         print(f"未找到 feeds 目录: {feeds_dir}")
@@ -2521,20 +2356,14 @@ def rss_main(argv: list[str]) -> int:
     transcribe_parser.add_argument("--output", "-o", default=None, help="输出 Markdown 路径")
     transcribe_parser.add_argument("--segment-seconds", type=int, default=None,
                                    help=f"分段时长(秒),默认 {DEFAULT_SEGMENT_SECONDS}")
-    transcribe_parser.add_argument("--workers", type=int, default=None,
-                                   help=f"并发请求数,默认 {DEFAULT_WORKERS}")
     transcribe_parser.add_argument("--asr-provider", choices=ASR_PROVIDERS, default=None,
-                                   help=f"ASR 引擎,默认 {DEFAULT_ASR_PROVIDER}; bcut/jianying 免费免配置,siliconflow 为旧兼容接口")
+                                   help=f"ASR 引擎,默认 {DEFAULT_ASR_PROVIDER}; bcut/jianying 免费免配置")
     transcribe_parser.add_argument("--free-asr-chunk-minutes", type=int, default=None,
                                    help=f"免费 ASR 长音频切片分钟数,默认 {DEFAULT_FREE_ASR_CHUNK_MINUTES}")
     transcribe_parser.add_argument("--free-asr-overlap-seconds", type=int, default=None,
                                    help=f"免费 ASR 切片重叠秒数,默认 {DEFAULT_FREE_ASR_OVERLAP_SECONDS}")
     transcribe_parser.add_argument("--free-asr-workers", type=int, default=None,
                                    help=f"免费 ASR 分片并发数,默认 {DEFAULT_FREE_ASR_WORKERS}")
-    transcribe_parser.add_argument("--model", default=None,
-                                   help=f"siliconflow provider 使用的转录模型,默认 {DEFAULT_MODEL}")
-    transcribe_parser.add_argument("--api-endpoint", default=None,
-                                   help=f"siliconflow provider 使用的 endpoint,默认 {API_ENDPOINT}")
     transcribe_parser.add_argument("--audio-bitrate", default=None,
                                    help=f"转码后的音频码率,默认 {AUDIO_BITRATE}")
     transcribe_parser.add_argument("--keep-audio", action=argparse.BooleanOptionalAction,
@@ -2557,20 +2386,20 @@ def rss_main(argv: list[str]) -> int:
     subs_parser = subparsers.add_parser("subs", help="列出所有已订阅的播客")
     subs_parser.add_argument("--library-dir", default=None, help="播客库目录")
 
-    sync_feeds_parser = subparsers.add_parser("sync-feeds", help="批量从 podscribe-feeds 导入并同步(需 --all 或 --category)")
-    sync_feeds_parser.add_argument("--feeds-dir", default=None, help="podscribe-feeds 目录路径,默认 transcribe.py 同级的 podscribe-feeds/")
+    sync_feeds_parser = subparsers.add_parser("sync-feeds", help="批量从 podcast-bridge-feeds 导入并同步(需 --all 或 --category)")
+    sync_feeds_parser.add_argument("--feeds-dir", default=None, help="podcast-bridge-feeds 目录路径,默认 transcribe.py 同级的 podcast-bridge-feeds/")
     sync_feeds_parser.add_argument("--limit", type=int, default=50, help="每个播客同步多少期,默认 50")
     sync_feeds_parser.add_argument("--all", action="store_true", help="导入全部播客")
     sync_feeds_parser.add_argument("--category", default=None, help="只导入指定分类,如 AI, tech-business")
     sync_feeds_parser.add_argument("--library-dir", default=None, help="播客库目录")
 
     browse_feeds_parser = subparsers.add_parser("browse-feeds", help="浏览 feeds 目录下所有可选播客")
-    browse_feeds_parser.add_argument("--feeds-dir", default=None, help="podscribe-feeds 目录路径")
+    browse_feeds_parser.add_argument("--feeds-dir", default=None, help="podcast-bridge-feeds 目录路径")
     browse_feeds_parser.add_argument("--library-dir", default=None, help="播客库目录")
 
     add_from_feeds_parser = subparsers.add_parser("add-from-feeds", help="从 feeds 中选择一个播客订阅")
     add_from_feeds_parser.add_argument("name", help="播客名(支持模糊匹配)")
-    add_from_feeds_parser.add_argument("--feeds-dir", default=None, help="podscribe-feeds 目录路径")
+    add_from_feeds_parser.add_argument("--feeds-dir", default=None, help="podcast-bridge-feeds 目录路径")
     add_from_feeds_parser.add_argument("--limit", type=int, default=50, help="同步多少期,默认 50")
     add_from_feeds_parser.add_argument("--library-dir", default=None, help="播客库目录")
 
@@ -2628,20 +2457,14 @@ def main() -> int:
     parser.add_argument("--output", "-o", default=None, help="输出文件路径")
     parser.add_argument("--segment-seconds", type=int, default=None,
                         help=f"分段时长(秒),默认 {DEFAULT_SEGMENT_SECONDS}")
-    parser.add_argument("--workers", type=int, default=None,
-                        help=f"并发请求数,默认 {DEFAULT_WORKERS}")
     parser.add_argument("--asr-provider", choices=ASR_PROVIDERS, default=None,
-                        help=f"ASR 引擎,默认 {DEFAULT_ASR_PROVIDER}; bcut/jianying 免费免配置,siliconflow 为旧兼容接口")
+                        help=f"ASR 引擎,默认 {DEFAULT_ASR_PROVIDER}; bcut/jianying 免费免配置")
     parser.add_argument("--free-asr-chunk-minutes", type=int, default=None,
                         help=f"免费 ASR 长音频切片分钟数,默认 {DEFAULT_FREE_ASR_CHUNK_MINUTES}")
     parser.add_argument("--free-asr-overlap-seconds", type=int, default=None,
                         help=f"免费 ASR 切片重叠秒数,默认 {DEFAULT_FREE_ASR_OVERLAP_SECONDS}")
     parser.add_argument("--free-asr-workers", type=int, default=None,
                         help=f"免费 ASR 分片并发数,默认 {DEFAULT_FREE_ASR_WORKERS}")
-    parser.add_argument("--model", default=None,
-                        help=f"siliconflow provider 使用的转录模型,默认 {DEFAULT_MODEL}")
-    parser.add_argument("--api-endpoint", default=None,
-                        help=f"siliconflow provider 使用的 endpoint,默认 {API_ENDPOINT}")
     parser.add_argument("--audio-bitrate", default=None,
                         help=f"转码后的音频码率,默认 {AUDIO_BITRATE}")
     parser.add_argument("--keep-audio", action=argparse.BooleanOptionalAction,

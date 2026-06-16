@@ -1,4 +1,4 @@
-# PodScribe
+# podcast-bridge
 
 [English](./README.en.md) 
 
@@ -24,13 +24,13 @@
 ## 目录结构
 
 ```
-podscribe/
+podcast-bridge/
 ├── transcribe.py                # 核心：转录 / RSS 管理 / 搜索
-├── config.json                  # 硅基流动 API 配置
+├── config.json                  # 本地转录配置
 ├── subscriptions.json           # 活跃订阅列表
 ├── podcast_library/             # 转录后的本地知识库
 │
-├── podscribe-feeds/             # 📦 分领域订阅库
+├── podcast-bridge-feeds/        # 📦 分领域订阅库
 │   ├── feeds/
 │   │   ├── ai.json              # AI（中英混排，含 Lex Fridman）
 │   │   ├── tech-business.json   # 科技与商业（含 Acquired / All-In …）
@@ -50,17 +50,17 @@ podscribe/
 
 ```text
 "帮我装一下这个播客工具skill"
-"配好播客PodScribe skill，我想开始用了"
+"配好播客 podcast-bridge skill，我想开始用了"
 ```
 
 Agent 会自动完成以下全部步骤：
 
 1. **检查环境** — python / ffmpeg / ffprobe，缺什么装什么
-2. **配置 API Key** — 运行 `python transcribe.py --init`，引导你填硅基流动的 Key（RSS 入库不需要，转录时才用）
+2. **生成配置** — 运行 `python transcribe.py --init`，生成本地配置文件（默认转录不需要 API Key）
 3. **拉取订阅库** — 运行 `resolve_feeds.py bootstrap`，通过 iTunes 把内置 64 个中英文节目的官方 RSS 全部解析回来
 4. **导入订阅** — 运行 `import_feeds.py --all`，合并进 `subscriptions.json`
 
-全程你只需要提供一个硅基流动 API Key，其余 Agent 处理。
+默认链路不需要提供 API Key，其余 Agent 处理。
 
 > 手动跑也行，见下面的命令，但一般不需要。
 
@@ -76,10 +76,8 @@ python --version && ffmpeg -version && ffprobe -version
 
 # 配置
 python transcribe.py --init
-# 或环境变量: export SILICONFLOW_API_KEY=sk-你的Key
-
 # 订阅库
-cd podscribe-feeds
+cd podcast-bridge-feeds
 python resolve_feeds.py bootstrap
 python import_feeds.py --all
 ```
@@ -130,7 +128,7 @@ python transcribe.py rss subs
 ### 管理订阅库
 
 ```bash
-cd podscribe-feeds
+cd podcast-bridge-feeds
 
 # 按名字加一个节目
 python resolve_feeds.py add "Latent Space" --category ai --country us
@@ -168,5 +166,5 @@ python transcribe.py rss --help                   # RSS 帮助
 - RSS 中没有音频 URL 的单集只能入库标题和简介，不能转录。
 - 转录模型不区分说话人。
 - 自动章节和摘要适合作为初稿，重要内容建议人工复核。
-- 长音频耗时取决于音频长度、并发数和 API 限流。
+- 长音频耗时取决于音频长度、网络状况和云端接口限流。
 - `bootstrap` / `add` / `upgrade` 需要能访问 `itunes.apple.com`。

@@ -1,9 +1,5 @@
 {
-  "siliconflow_api_key": "",
-  "model": "FunAudioLLM/SenseVoiceSmall",
-  "api_endpoint": "https://api.siliconflow.cn/v1/audio/transcriptions",
   "segment_seconds": 30,
-  "workers": 5,
   "free_asr_chunk_minutes": 15,
   "free_asr_overlap_seconds": 15,
   "free_asr_workers": 4,

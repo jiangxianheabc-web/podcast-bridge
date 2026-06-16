@@ -22,7 +22,7 @@ Run the wizard only when configuration is missing or the user asks to initialize
 python transcribe.py --init
 ```
 
-Default transcription uses BcutASR and needs no API key. `--asr-provider siliconflow` is the legacy SenseVoice path and needs `SILICONFLOW_API_KEY` or a key in `config.json`.
+Default transcription uses BcutASR and needs no API key.
 
 Configuration priority: command-line arguments, `config.json`, environment variables, built-in defaults.
 
@@ -32,7 +32,7 @@ Configuration priority: command-line arguments, `config.json`, environment varia
 python transcribe.py --preflight-only "<episode-url>"
 ```
 
-Preflight checks `ffmpeg`, `ffprobe`, ASR provider setup, and episode page parsing. Only siliconflow checks an API key.
+Preflight checks `ffmpeg`, `ffprobe`, ASR provider setup, and episode page parsing.
 
 ## Direct Episode Transcription
 
@@ -52,7 +52,6 @@ Switch ASR provider only when needed:
 
 ```bash
 python transcribe.py "<episode-url>" --asr-provider jianying --chapters
-python transcribe.py "<episode-url>" --asr-provider siliconflow --chapters
 ```
 
 ## RSS Episode Transcription
@@ -70,9 +69,8 @@ python transcribe.py rss transcribe "<podcast-name>" "#12" --chapters
 |---|---|
 | `--chapters` | Write automatic chapters into the transcript. |
 | `--summary [mode]` | Compatibility/style hint for the Agent; does not create a summary file. |
-| `--asr-provider` | ASR engine: `bcut`, `jianying`, or `siliconflow`. |
+| `--asr-provider` | ASR engine: `bcut` or `jianying`. |
 | `--segment-seconds N` | Target transcript paragraph length; default is about 30 seconds. |
-| `--workers N` | Concurrent workers; default is 5. |
 | `--free-asr-chunk-minutes N` | Long-audio chunk size for free ASR; default is 10 minutes. |
 | `--free-asr-overlap-seconds N` | Chunk overlap for free ASR; default is 10 seconds. |
 | `--free-asr-workers N` | Chunk transcription concurrency; default is 3. |

@@ -1,4 +1,4 @@
-# PodScribe has ZERO third-party Python dependencies.
+# podcast-bridge has ZERO third-party Python dependencies.
 # It runs on the Python standard library alone (urllib, sqlite3, xml.etree, ...).
 #
 # Requirements:

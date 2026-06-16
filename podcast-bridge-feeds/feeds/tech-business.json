@@ -1,42 +1,47 @@
 [
   {
     "name": "What's Next｜科技早知道",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e74b52c418a84a046ecaceb",
+    "rss_url": "https://feeds.fireside.fm/guiguzaozhidao/rss",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:40+00:00"
   },
   {
     "name": "三五环",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e280fab418a84a0461faa3c",
+    "rss_url": "https://proxy.wavpub.com/35huan.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:41+00:00"
   },
   {
     "name": "42章经",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/648b0b641c48983391a63f98",
+    "rss_url": "https://feed.xyzfm.space/evgg6xle9rdc",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
+    "source": "itunes",
     "note": "科技创业与人物深度对话。聚焦有趣、有独到认知的聪明人，聊AI创业、Infra、投资、中美差异、组织与产品实战。曲凯主理。",
-    "recommended": true
+    "recommended": true,
+    "updated_at": "2026-06-16T13:28:42+00:00"
   },
   {
     "name": "知行小酒馆",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6013f9f58e2f7ee375cf4216",
+    "rss_url": "https://feed.xyzfm.space/j8yp8gxkmgqr",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "有知有行出品，投资与理财"
+    "source": "itunes",
+    "note": "有知有行出品，投资与理财",
+    "updated_at": "2026-06-16T13:28:43+00:00"
   },
   {
     "name": "纵横四海",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/62694abdb221dd5908417d1e",
+    "rss_url": "https://www.ximalaya.com/album/67531569.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "商业经典与人物传记拆解"
+    "source": "itunes",
+    "note": "商业经典与人物传记拆解",
+    "updated_at": "2026-06-16T13:28:44+00:00"
   },
   {
     "name": "乱翻书",
@@ -47,66 +52,74 @@
   },
   {
     "name": "硬地骇客",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/640ee2438be5d40013fe4a87",
+    "rss_url": "https://feed.xyzfm.space/byhkljlbep9j",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "独立开发与出海"
+    "source": "itunes",
+    "note": "独立开发与出海",
+    "updated_at": "2026-06-16T13:28:45+00:00"
   },
   {
     "name": "枫言枫语",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e2864f5418a84a04628e249",
+    "rss_url": "https://justinyan.me/feed/podcast",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:46+00:00"
   },
   {
     "name": "屠龙之术",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6507bc165c88d2412626b401",
+    "rss_url": "https://feed.xyzfm.space/834hyx3v9k74",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "工程师管理与职业成长"
+    "source": "itunes",
+    "note": "工程师管理与职业成长",
+    "updated_at": "2026-06-16T13:28:47+00:00"
   },
   {
     "name": "卫诗婕｜商业漫谈 Jane's talk",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6627fda4b56459544087d86a",
+    "rss_url": "https://feed.xyzfm.space/4jjdlpq3khc9",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:49+00:00"
   },
   {
     "name": "奇想驿 by 产品沉思录",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6034daea97755b8fc9c66480",
+    "rss_url": "https://feed.xyzfm.space/4wq8y3ymmc7p",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "产品与创作思考"
+    "source": "itunes",
+    "note": "产品与创作思考",
+    "updated_at": "2026-06-16T13:28:50+00:00"
   },
   {
     "name": "半拿铁 | 商业沉浮录",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00",
+    "rss_url": "https://proxy.wavpub.com/caffebreve.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
+    "source": "itunes",
     "note": "商业故事与沉浮深度访谈/周刊。讲述互联网与科技商业背后的故事与真相，穿插AI与职场/产业变迁。刘飞(财经媒体人)、潇磊(产品经理)主理，含半拿铁·周刊。",
-    "recommended": true
+    "recommended": true,
+    "updated_at": "2026-06-16T13:28:51+00:00"
   },
   {
     "name": "自习室 STUDY ROOM",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/65a5fb7540d4ef949c0140ac",
+    "rss_url": "https://www.ximalaya.com/album/80074602.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:52+00:00"
   },
   {
     "name": "罗永浩的十字路口",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/68981df29e7bcd326eb91d88",
+    "rss_url": "https://feed.xyzfm.space/wmnkvmrpwuww",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "xiaoyuzhou-rsshub",
+    "source": "itunes",
     "note": "科技与人文深度长访谈（3-5小时+）。讲述个体命运与时代趋势，重点覆盖AI、具身智能、创业与商业变革。画风更倾向于被访者的个人经历。",
-    "recommended": true
+    "recommended": true,
+    "updated_at": "2026-06-16T13:28:54+00:00"
   },
   {
     "name": "MacTalk·夜航西飞",
@@ -126,11 +139,12 @@
   },
   {
     "name": "随机漫谈",
-    "rss_url": "https://www.ximalaya.com/album/19242373.xml",
+    "rss_url": "http://www.ximalaya.com/album/19242373.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "科技商业",
-    "source": "ximalaya",
-    "note": "科技、产业、金融、创业"
+    "source": "itunes",
+    "note": "科技、产业、金融、创业",
+    "updated_at": "2026-06-16T13:28:56+00:00"
   },
   {
     "name": "起朱楼宴宾客",

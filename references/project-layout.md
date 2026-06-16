@@ -5,7 +5,7 @@ Use this reference when changing the skill structure, explaining where files liv
 ## Layout
 
 ```text
-podscribe/
+podcast-bridge/
 ├── SKILL.md
 ├── references/
 │   ├── transcription.md
@@ -21,7 +21,7 @@ podscribe/
 ├── podcast_library/
 │   ├── library.sqlite3
 │   └── transcripts/
-└── podscribe-feeds/
+└── podcast-bridge-feeds/
     ├── feeds/
     │   ├── ai.json
     │   ├── tech-business.json
@@ -34,9 +34,9 @@ podscribe/
 
 ## Path Assumptions
 
-The executable scripts currently live at the repository root and under `podscribe-feeds/` to preserve relative paths used by existing commands.
+The executable scripts currently live at the repository root and under `podcast-bridge-feeds/` to preserve relative paths used by existing commands.
 
-Do not move `transcribe.py`, `podscribe-feeds/resolve_feeds.py`, or `podscribe-feeds/import_feeds.py` into `scripts/` unless you also update command examples, imports, working-directory assumptions, and any path logic in the code.
+Do not move `transcribe.py`, `podcast-bridge-feeds/resolve_feeds.py`, or `podcast-bridge-feeds/import_feeds.py` into `scripts/` unless you also update command examples, imports, working-directory assumptions, and any path logic in the code.
 
 ## Skill Packaging Notes
 

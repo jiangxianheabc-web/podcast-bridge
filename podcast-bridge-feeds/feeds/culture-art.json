@@ -1,11 +1,12 @@
 [
   {
     "name": "跳岛FM",
-    "rss_url": "https://tiaodao.typlog.io/feed/audio.xml",
+    "rss_url": "https://tiaodao.typlog.io/feed.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "文化艺术",
-    "source": "typlog",
-    "note": "中信·大方出品的文学播客；如失效用 resolve_feeds.py 修复（Apple id 1504037049）"
+    "source": "itunes",
+    "note": "中信·大方出品的文学播客；如失效用 resolve_feeds.py 修复（Apple id 1504037049）",
+    "updated_at": "2026-06-16T13:28:28+00:00"
   },
   {
     "name": "一天世界",
@@ -17,10 +18,11 @@
   },
   {
     "name": "保持偏见",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/663e3c95af1e22bb157dcee3",
+    "rss_url": "https://feed.xyzfm.space/b6jdgevlyg66",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "文化艺术",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "设计、审美与创作"
+    "source": "itunes",
+    "note": "设计、审美与创作",
+    "updated_at": "2026-06-16T13:28:29+00:00"
   }
 ]

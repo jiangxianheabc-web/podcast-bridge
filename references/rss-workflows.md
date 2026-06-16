@@ -4,7 +4,7 @@ Use this reference for podcast subscription management, local library sync, brow
 
 ## Mental Model
 
-`podscribe-feeds/feeds/*.json` is the catalog: what is available to subscribe to.
+`podcast-bridge-feeds/feeds/*.json` is the catalog: what is available to subscribe to.
 `subscriptions.json` is the active subscription list: what the local library follows.
 `podcast_library/library.sqlite3` stores synced episode metadata and transcript state.
 
@@ -58,7 +58,7 @@ python transcribe.py rss transcribe "日谈公园" "#12" --chapters
 Use these when the user wants recommendations, first-time setup, source repair, or feed validation.
 
 ```bash
-cd podscribe-feeds
+cd podcast-bridge-feeds
 
 python resolve_feeds.py bootstrap
 python resolve_feeds.py add "声动早咖啡" --category tech-business --country cn

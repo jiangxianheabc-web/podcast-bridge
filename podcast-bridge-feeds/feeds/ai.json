@@ -1,0 +1,202 @@
+[
+  {
+    "name": "张小珺Jùn｜商业访谈录",
+    "rss_url": "https://feed.xyzfm.space/dk4yh3pkpjp3",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "科技商业深度长访谈（常2-7小时）。聚焦中国科技业、AI、风险投资与创始人真实表达，高密度前沿信息。推荐：朱啸虎那期（创新适合市场偏差15%）。",
+    "recommended": true
+  },
+  {
+    "name": "硅谷101",
+    "rss_url": "https://feeds.fireside.fm/sv101/rss",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "科技商业深度访谈。大量AI主题（AI Agent、DeepMind历史、AI时代大学教育、投资逻辑等）。含101 Weekly轻量版。泓君/Jane主理。",
+    "recommended": true,
+    "updated_at": "2026-06-16T13:27:42+00:00"
+  },
+  {
+    "name": "晚点聊 LateTalk",
+    "rss_url": "https://feeds.fireside.fm/latetalk/rss",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "晚点团队的科技与 AI 长访谈",
+    "updated_at": "2026-06-16T13:27:43+00:00"
+  },
+  {
+    "name": "OnBoard!",
+    "rss_url": "https://feed.xyzfm.space/xxg7ryklkkft",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "中美科技、云、AI 与一级市场",
+    "updated_at": "2026-06-16T13:27:44+00:00"
+  },
+  {
+    "name": "AI炼金术",
+    "rss_url": "https://www.ximalaya.com/album/74194808.xml",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "聚焦 AI 应用与落地",
+    "updated_at": "2026-06-16T13:27:45+00:00"
+  },
+  {
+    "name": "人民公园说AI",
+    "rss_url": "https://feed.xyzfm.space/49cgd8grgrnf",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "AI 话题轻松向解读",
+    "updated_at": "2026-06-16T13:27:46+00:00"
+  },
+  {
+    "name": "十字路口Crossing",
+    "rss_url": "https://feed.xyzfm.space/68fyjknth9hj",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "AI 产品与 Agent",
+    "updated_at": "2026-06-16T13:27:47+00:00"
+  },
+  {
+    "name": "开始连接LinkStart",
+    "rss_url": "https://feed.xyzfm.space/q9a6lueucj6a",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "itunes",
+    "note": "AI 与技术从业者对谈",
+    "updated_at": "2026-06-16T13:27:48+00:00"
+  },
+  {
+    "name": "Lex Fridman Podcast",
+    "rss_url": "https://lexfridman.com/feed/podcast/",
+    "added_at": "2026-06-09T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，AI / 科学 / 哲学长访谈。"
+  },
+  {
+    "name": "Latent Space: The AI Engineer Podcast",
+    "rss_url": "https://rss.flightcast.com/vgnxzgiwwzwke85ym53fjnzu.xml",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，AI 工程师向播客。聚焦 foundation model、AI Agent、代码生成、GPU infra、模型产品化与 AI 工程实践，适合开发者、AI 产品经理和工具创业者长期跟听。",
+    "recommended": true
+  },
+  {
+    "name": "The TWIML AI Podcast",
+    "rss_url": "https://feeds.megaphone.fm/MLN2155636147",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，老牌机器学习与人工智能访谈播客。覆盖 ML、深度学习、NLP、数据科学、企业 AI 落地与研究者访谈，适合系统追踪 AI/ML 产业与技术演进。",
+    "recommended": true
+  },
+  {
+    "name": "Practical AI",
+    "rss_url": "https://feeds.transistor.fm/practical-ai-machine-learning-data-science-llm",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，偏实用落地的 AI 播客。关注 AI、机器学习、LLM、MLOps、真实业务场景和产品化案例，适合非纯研究背景但想把 AI 用起来的人。"
+  },
+  {
+    "name": "Gradient Dissent",
+    "rss_url": "https://feeds.captivate.fm/gradient-dissent/",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，Weights & Biases 相关播客。偏模型训练、实验管理、MLOps、生产部署和 AI 公司实践，适合关注工程化与模型落地的人。"
+  },
+  {
+    "name": "No Priors",
+    "rss_url": "https://feeds.megaphone.fm/nopriors",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，AI 创业、投资与前沿技术访谈。Sarah Guo 和 Elad Gil 主持，常采访 AI 创始人、研究员、产品负责人，适合看 AI 商业机会与产业趋势。",
+    "recommended": true
+  },
+  {
+    "name": "Dwarkesh Podcast",
+    "rss_url": "https://api.substack.com/feed/podcast/69345.rss",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，高密度长访谈。常聊 AGI、Scaling、AI 实验室、芯片、科学与社会影响。适合深度学习和做人物/主题知识图谱。备注：Apple 侧存在备用 feed：apple.dwarkesh-podcast.workers.dev/feed.rss。",
+    "recommended": true
+  },
+  {
+    "name": "The Cognitive Revolution",
+    "rss_url": "https://feeds.megaphone.fm/RINTP3108857801",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，前沿 AI、AI builders、研究者与产业访谈。偏 frontier AI、alignment、Agent、模型能力与 AI 未来影响，信息密度较高。"
+  },
+  {
+    "name": "Machine Learning Street Talk (MLST)",
+    "rss_url": "https://anchor.fm/s/1e4a0eac/podcast/rss",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，硬核 AI / 机器学习 / 认知科学 / 神经科学 / 心智哲学讨论。适合想听更长、更理论化、更有争辩感内容的人。"
+  },
+  {
+    "name": "Interconnects",
+    "rss_url": "https://api.substack.com/feed/podcast/48206.rss",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，Nathan Lambert 的 AI 音频文章与访谈。重点关注开源模型、post-training、模型评测、AI 实验室动态和技术生态，适合追踪 open model 方向。",
+    "recommended": true
+  },
+  {
+    "name": "The AI Daily Brief",
+    "rss_url": "https://anchor.fm/s/f7cac464/podcast/rss",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，每日 AI 新闻简报。适合快速追踪模型发布、公司动态、政策争议、AI 产品和行业热点，适合作为每日信息流入口。",
+    "recommended": true
+  },
+  {
+    "name": "Hard Fork",
+    "rss_url": "https://feeds.simplecast.com/6HKOhNgS",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，纽约时报科技播客。不是纯 AI，但经常覆盖 AI 公司、模型发布、平台竞争、监管与社会影响，适合轻量跟踪科技产业语境。"
+  },
+  {
+    "name": "AI & I",
+    "rss_url": "https://feeds.transistor.fm/how-do-you-use-chatgpt",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，Dan Shipper 主持。关注真实用户如何使用 ChatGPT、Claude、Midjourney 等 AI 工具进行写作、创作、产品和工作流改造，适合做 AI 使用案例库。",
+    "recommended": true
+  },
+  {
+    "name": "Mixture of Experts",
+    "rss_url": "https://feed.7f5afe5c.public.multi-containers.ibm.com/rss/1773841/403892542/1_x5yvmanw",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，IBM 出品的 AI 新闻与企业视角圆桌。偏企业 AI、AI 治理、行业趋势、模型新闻与商业影响，适合补充 B 端/企业 AI 视角。"
+  },
+  {
+    "name": "NVIDIA AI Podcast",
+    "rss_url": "https://feeds.megaphone.fm/nvidiaaipodcast",
+    "added_at": "2026-06-16T00:00:00+00:00",
+    "category": "AI",
+    "source": "official",
+    "note": "英文，NVIDIA 出品。偏 AI 应用案例、机器人、硬件、科学计算、企业 AI 与 NVIDIA 生态，适合关注算力、硬件和垂直场景。"
+  }
+]

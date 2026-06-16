@@ -1,10 +1,5 @@
-# --- PodScribe: personal data & secrets (NEVER commit) ---
-config.json
-subscriptions.json
-_user_meta.json
-podcast_library/
-*.summary.*.md              # generated summaries
-*.transcript.md
+# --- podcast-bridge: personal data & secrets (NEVER commit) ---
+
 
 # --- Python ---
 __pycache__/

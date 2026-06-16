@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-import_feeds.py — 把本订阅库的分类文件合并进 PodScribe 的 subscriptions.json
+import_feeds.py — 把本订阅库的分类文件合并进 podcast-bridge 的 subscriptions.json
 
-PodScribe 的 RSS 库只认一个 subscriptions.json（数组，每项 {name, rss_url, ...}）。
+podcast-bridge 的 RSS 库只认一个 subscriptions.json（数组，每项 {name, rss_url, ...}）。
 这个脚本把 feeds/ 下选中的分类（或全部）按 rss_url + name 去重后合并进去，
 不会覆盖你已有的订阅，只追加新的，并补上 added_at 时间戳。
 
@@ -133,7 +133,7 @@ def main() -> int:
         json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     print(f"\n✅ 已写入 {args.target}（共 {len(merged)} 个订阅）。")
-    print("接下来可以让 PodScribe 同步，例如：")
+    print("接下来可以让 podcast-bridge 同步，例如：")
     for e in to_add[:3]:
         print(f'  python transcribe.py rss sync "{e["name"]}" --limit 50')
     return 0

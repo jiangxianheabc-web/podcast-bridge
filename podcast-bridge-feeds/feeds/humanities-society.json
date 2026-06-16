@@ -23,56 +23,63 @@
   },
   {
     "name": "东腔西调",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5f72b66083c34e85dd14fde9",
+    "rss_url": "https://www.ximalaya.com/album/41153937.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "大象公会出品，社科话题"
+    "source": "itunes",
+    "note": "大象公会出品，社科话题",
+    "updated_at": "2026-06-16T13:28:32+00:00"
   },
   {
     "name": "此话当真",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/646f194853a5e5ea1408d97c",
+    "rss_url": "https://www.ximalaya.com/album/76257752.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:33+00:00"
   },
   {
     "name": "跨国串门儿计划",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/670f3da40d2f24f28978736f",
+    "rss_url": "https://feed.xyzfm.space/r8t44lmvu99m",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:34+00:00"
   },
   {
     "name": "皮蛋漫游记",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/6281264ad22bcf3950c80b56",
+    "rss_url": "https://feed.xyzfm.space/ju9frjfuj9b6",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "xiaoyuzhou-rsshub"
+    "source": "itunes",
+    "updated_at": "2026-06-16T13:28:35+00:00"
   },
   {
     "name": "天真不天真",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/65cef9e3cace72dff8d98de3",
+    "rss_url": "https://feed.xyzfm.space/mcklbwxjdvfu",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "杨天真，职场与人生"
+    "source": "itunes",
+    "note": "杨天真，职场与人生",
+    "updated_at": "2026-06-16T13:28:36+00:00"
   },
   {
     "name": "牛油果烤面包",
-    "rss_url": "https://rsshub.bestblogs.dev/xiaoyuzhou/podcast/5e7c8b2b418a84a046e3ecbc",
+    "rss_url": "https://avocadotoast.typlog.io/feed/audio.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "xiaoyuzhou-rsshub",
-    "note": "生活方式与关系"
+    "source": "itunes",
+    "note": "生活方式与关系",
+    "updated_at": "2026-06-16T13:28:37+00:00"
   },
   {
     "name": "虎扯电台",
-    "rss_url": "https://www.ximalaya.com/album/15384496.xml",
+    "rss_url": "http://www.ximalaya.com/album/15384496.xml",
     "added_at": "2026-06-09T00:00:00+00:00",
     "category": "人文社会",
-    "source": "ximalaya",
-    "note": "轻松娱乐闲聊"
+    "source": "itunes",
+    "note": "轻松娱乐闲聊",
+    "updated_at": "2026-06-16T13:28:38+00:00"
   },
   {
     "name": "不丧",

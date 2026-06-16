@@ -7,12 +7,10 @@ Use this reference when commands fail, output encoding breaks, or the user asks 
 | Symptom | Handling |
 |---|---|
 | Cannot extract audio URL | Confirm the input is an episode URL, not a podcast homepage. |
-| Preflight fails | Follow the printed hints. Common causes are missing `ffmpeg` or `ffprobe`; only siliconflow needs an API key. |
-| BcutASR timeout or failure | Retry later or switch to `--asr-provider jianying` or `--asr-provider siliconflow`. |
-| JianYingASR timeout or failure | Retry later or switch to `--asr-provider bcut` or `--asr-provider siliconflow`. |
-| HTTP 401 | API key is invalid or wrong, usually only for siliconflow. |
+| Preflight fails | Follow the printed hints. Common causes are missing `ffmpeg` or `ffprobe`. |
+| BcutASR timeout or failure | Retry later or switch to `--asr-provider jianying`. |
+| JianYingASR timeout or failure | Retry later or switch to `--asr-provider bcut`. |
 | HTTP 429 | Rate limited; retry later. |
-| HTTP 402 | Insufficient balance, only for siliconflow. |
 | `ffmpeg Invalid data` | Audio download may be incomplete; rerun. |
 | iTunes cannot connect during bootstrap/add/upgrade | Confirm access to `itunes.apple.com`. |
 | RSS 404 or SSL error | Feed source may be stale; try resolving it again with `resolve_feeds.py add`. |

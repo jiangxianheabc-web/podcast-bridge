@@ -41,7 +41,7 @@ from pathlib import Path
 
 ITUNES_SEARCH = "https://itunes.apple.com/search"
 ITUNES_LOOKUP = "https://itunes.apple.com/lookup"
-UA = "Mozilla/5.0 (PodScribe-feeds resolver)"
+UA = "Mozilla/5.0 (podcast-bridge-feeds resolver)"
 
 
 def now_iso() -> str:
@@ -261,7 +261,7 @@ def cmd_bootstrap(args) -> int:
     suffix = "（--dry-run，未写入）" if args.dry_run else ""
     print(f"\n完成: 新增 {added}，已存在 {exists}，未找到 {missing}{suffix}。")
     if not args.dry_run and added:
-        print("接着把它们并进 PodScribe: python import_feeds.py --all")
+        print("接着把它们并进 podcast-bridge: python import_feeds.py --all")
     return 0
 
 
