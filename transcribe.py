@@ -459,7 +459,7 @@ def download(url: str, dst: Path) -> None:
         url,
         headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.xiaoyuzhoufm.com/"},
     )
-    with urllib.request.urlopen(req, timeout=120) as resp, open(dst, "wb") as f:
+    with urllib.request.urlopen(req, timeout=600) as resp, open(dst, "wb") as f:
         shutil.copyfileobj(resp, f)
     size_mb = dst.stat().st_size / 1024 / 1024
     log(f"   完成 ({size_mb:.1f} MB)")
@@ -807,13 +807,24 @@ def transcribe_with_bcut(audio_path: Path, label: str | None = None) -> list[tup
     if not task_id:
         raise RuntimeError(f"必剪 ASR 创建任务失败: {task_resp}")
 
+    _bcut_412_retries = 0
+    _bcut_max_412_retries = 5
     for poll in range(1, 901):
-        result_resp, _ = http_json_request(
-            BCUT_API_QUERY_RESULT,
-            params={"model_id": 7, "task_id": task_id},
-            headers=headers,
-            timeout=60,
-        )
+        try:
+            result_resp, _ = http_json_request(
+                BCUT_API_QUERY_RESULT,
+                params={"model_id": 8, "task_id": task_id},
+                headers=headers,
+                timeout=60,
+            )
+        except RuntimeError as e:
+            if "HTTP 412" in str(e) and _bcut_412_retries < _bcut_max_412_retries:
+                _bcut_412_retries += 1
+                wait_sec = 30 * _bcut_412_retries
+                log(f"   ⚠️ bcut 返回 412, 第 {_bcut_412_retries} 次重试, 等待 {wait_sec}s...")
+                time.sleep(wait_sec)
+                continue
+            raise
         result_data = result_resp.get("data") or {}
         state = result_data.get("state")
         if state == 4:
