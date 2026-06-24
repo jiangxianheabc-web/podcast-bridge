@@ -2,7 +2,7 @@
   "segment_seconds": 30,
   "free_asr_chunk_minutes": 15,
   "free_asr_overlap_seconds": 15,
-  "free_asr_workers": 4,
+  "free_asr_workers": 1,
   "audio_bitrate": "64k",
   "output": null,
   "keep_audio": false,
