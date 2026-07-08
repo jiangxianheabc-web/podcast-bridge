@@ -62,6 +62,10 @@ DEFAULT_SEGMENT_SECONDS = 30
 DEFAULT_FREE_ASR_CHUNK_MINUTES = 10
 DEFAULT_FREE_ASR_OVERLAP_SECONDS = 10
 DEFAULT_FREE_ASR_WORKERS = 3
+DEFAULT_LONG_AUDIO_THRESHOLD_MINUTES = 240
+DEFAULT_LONG_AUDIO_PARTS = 2
+DEFAULT_LONG_AUDIO_PART_MINUTES = 90
+DEFAULT_LONG_AUDIO_OVERLAP_SECONDS = 30
 AUDIO_BITRATE = "64k"
 SUMMARY_MODES = ("brief", "deep", "product", "investment", "obsidian")
 
@@ -139,6 +143,10 @@ class Settings:
     free_asr_chunk_minutes: int
     free_asr_overlap_seconds: int
     free_asr_workers: int
+    long_audio_threshold_minutes: int
+    long_audio_parts: int
+    long_audio_part_minutes: int
+    long_audio_overlap_seconds: int
     output: str | None
     keep_audio: bool
     audio_bitrate: str
@@ -300,6 +308,38 @@ def build_settings(args: argparse.Namespace, config: dict) -> Settings:
         if getattr(args, "free_asr_workers", None) is not None
         else to_int(config_get(config, "free_asr_workers", default=DEFAULT_FREE_ASR_WORKERS), "free_asr_workers")
     )
+    long_audio_threshold_minutes = (
+        args.long_audio_threshold_minutes
+        if getattr(args, "long_audio_threshold_minutes", None) is not None
+        else to_int(
+            config_get(config, "long_audio_threshold_minutes", default=DEFAULT_LONG_AUDIO_THRESHOLD_MINUTES),
+            "long_audio_threshold_minutes",
+        )
+    )
+    long_audio_parts = (
+        args.long_audio_parts
+        if getattr(args, "long_audio_parts", None) is not None
+        else to_int(
+            config_get(config, "long_audio_parts", default=DEFAULT_LONG_AUDIO_PARTS),
+            "long_audio_parts",
+        )
+    )
+    long_audio_part_minutes = (
+        args.long_audio_part_minutes
+        if getattr(args, "long_audio_part_minutes", None) is not None
+        else to_int(
+            config_get(config, "long_audio_part_minutes", default=DEFAULT_LONG_AUDIO_PART_MINUTES),
+            "long_audio_part_minutes",
+        )
+    )
+    long_audio_overlap_seconds = (
+        args.long_audio_overlap_seconds
+        if getattr(args, "long_audio_overlap_seconds", None) is not None
+        else to_int(
+            config_get(config, "long_audio_overlap_seconds", default=DEFAULT_LONG_AUDIO_OVERLAP_SECONDS),
+            "long_audio_overlap_seconds",
+        )
+    )
     keep_audio = (
         args.keep_audio
         if args.keep_audio is not None
@@ -316,12 +356,27 @@ def build_settings(args: argparse.Namespace, config: dict) -> Settings:
     if free_asr_overlap_seconds >= free_asr_chunk_minutes * 60:
         raise ValueError("free_asr_overlap_seconds 必须小于 free_asr_chunk_minutes 对应秒数")
 
+    if long_audio_threshold_minutes < 0:
+        raise ValueError("long_audio_threshold_minutes must be >= 0")
+    if long_audio_parts < 0:
+        raise ValueError("long_audio_parts must be >= 0")
+    if long_audio_part_minutes < 0:
+        raise ValueError("long_audio_part_minutes must be >= 0")
+    if long_audio_overlap_seconds < 0:
+        raise ValueError("long_audio_overlap_seconds must be >= 0")
+    if long_audio_part_minutes > 0 and long_audio_overlap_seconds >= long_audio_part_minutes * 60:
+        raise ValueError("long_audio_overlap_seconds must be smaller than long_audio_part_minutes")
+
     return Settings(
         asr_provider=asr_provider,
         segment_seconds=segment_seconds,
         free_asr_chunk_minutes=free_asr_chunk_minutes,
         free_asr_overlap_seconds=free_asr_overlap_seconds,
         free_asr_workers=free_asr_workers,
+        long_audio_threshold_minutes=long_audio_threshold_minutes,
+        long_audio_parts=long_audio_parts,
+        long_audio_part_minutes=long_audio_part_minutes,
+        long_audio_overlap_seconds=long_audio_overlap_seconds,
         output=args.output if args.output is not None else config_get(config, "output", default=None),
         keep_audio=keep_audio,
         audio_bitrate=args.audio_bitrate or config_get(config, "audio_bitrate", default=AUDIO_BITRATE),
@@ -355,6 +410,15 @@ class EpisodeMeta:
     title: str
     audio_url: str
     podcast: str | None = None
+
+
+def _with_title_suffix(meta: EpisodeMeta, suffix: str) -> EpisodeMeta:
+    """返回复制版 EpisodeMeta，title 加后缀（如 '（上集）'）。
+
+    用来在长音频输出上下集时区分同一节目的两个 .md 文件标题。
+    """
+    from dataclasses import replace
+    return replace(meta, title=f"{meta.title}{suffix}")
 
 def parse_episode(html: str) -> EpisodeMeta:
     """从页面 HTML 提取标题和音频 URL"""
@@ -887,6 +951,192 @@ def transcribe_with_bcut_chunked(
     log(f"🔗 BcutASR 合并完成: {len(all_segments)} 段 -> {len(merged)} 段")
     return merged
 
+
+def slice_long_audio_parts(
+    src: Path,
+    total_duration: float,
+    part_seconds: int,
+    overlap_seconds: int,
+    workdir: Path,
+    audio_bitrate: str,
+) -> list[Chunk]:
+    """Split very long audio into larger resumable ASR parts before small chunking.
+
+    与 upstream 3b83f33 一致；这些函数让我们能够在长音频 (>= long_audio_threshold_minutes)
+    上避免单次 BcutASR 超时: 先 ffmpeg 切到 N 个 90 分钟的 mp3（重叠 overlap_seconds 秒），
+    再分别调 transcribe_with_bcut_chunked。
+    """
+    if part_seconds <= 0 or total_duration <= part_seconds:
+        return [Chunk(path=src, offset=0.0, duration=total_duration)]
+
+    step_seconds = part_seconds - overlap_seconds
+    parts_dir = workdir / "long_parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    parts: list[Chunk] = []
+    start = 0.0
+    idx = 0
+    while start < total_duration:
+        end = min(start + part_seconds, total_duration)
+        duration = end - start
+        if duration < 1.0:
+            break
+        path = parts_dir / f"long_part_{idx:04d}.mp3"
+        run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-ss", f"{start:.3f}",
+            "-t", f"{duration:.3f}",
+            "-i", str(src),
+            "-ac", "1",
+            "-b:a", audio_bitrate,
+            "-vn",
+            str(path),
+        ])
+        actual_duration = probe_duration(path)
+        parts.append(Chunk(path=path, offset=start, duration=actual_duration))
+        idx += 1
+        if end >= total_duration:
+            break
+        start += step_seconds
+
+    log(
+        f"Long audio pre-split: {len(parts)} parts, "
+        f"{part_seconds // 60} min each, {overlap_seconds}s overlap"
+    )
+    return parts
+
+
+def slice_long_audio_parts_by_count(
+    src: Path,
+    total_duration: float,
+    part_count: int,
+    overlap_seconds: int,
+    workdir: Path,
+    audio_bitrate: str,
+) -> list[Chunk]:
+    """Split very long audio into an exact number of large FFmpeg parts.
+
+    与 upstream 3b83f33 一致;区别仅在于按 part_count 切而不是按 part_minutes 切。
+    """
+    if part_count <= 1:
+        return [Chunk(path=src, offset=0.0, duration=total_duration)]
+
+    part_seconds = total_duration / part_count
+    parts_dir = workdir / "long_parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    parts: list[Chunk] = []
+    for idx in range(part_count):
+        base_start = idx * part_seconds
+        base_end = total_duration if idx == part_count - 1 else (idx + 1) * part_seconds
+        start = max(0.0, base_start - (overlap_seconds if idx > 0 else 0))
+        end = min(total_duration, base_end + (overlap_seconds if idx < part_count - 1 else 0))
+        duration = end - start
+        if duration < 1.0:
+            continue
+        path = parts_dir / f"long_part_{idx:04d}.mp3"
+        run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-ss", f"{start:.3f}",
+            "-t", f"{duration:.3f}",
+            "-i", str(src),
+            "-ac", "1",
+            "-b:a", audio_bitrate,
+            "-vn",
+            str(path),
+        ])
+        actual_duration = probe_duration(path)
+        parts.append(Chunk(path=path, offset=start, duration=actual_duration))
+
+    log(
+        f"Long audio pre-split: {len(parts)} parts by count, "
+        f"{overlap_seconds}s overlap"
+    )
+    return parts
+
+
+def transcribe_with_bcut_long_parts(
+    settings: Settings,
+    audio_path: Path,
+    duration: float,
+    workdir: Path,
+) -> list[tuple[float, float, str]]:
+    """长音频 (>= long_audio_threshold_minutes) 切分后转录。
+
+    与 upstream 3b83f33 不同点:
+    - 本函数调 transcribe_with_bcut_chunked (ahead 2 版本) 而不是 transcribe_with_bcut
+    - merge_overlapped_segments 使用 max(long_audio_overlap, free_asr_overlap)
+    - 不需要 actual_provider (ahead 2 的 transcribe_with_provider 不返回 provider name)
+    """
+    threshold_seconds = settings.long_audio_threshold_minutes * 60
+    part_seconds = settings.long_audio_part_minutes * 60
+    if (
+        settings.long_audio_threshold_minutes <= 0
+        or duration <= threshold_seconds
+    ):
+        return transcribe_with_bcut_chunked(settings, audio_path, duration, workdir)
+
+    if settings.long_audio_parts > 1:
+        parts = slice_long_audio_parts_by_count(
+            audio_path,
+            duration,
+            settings.long_audio_parts,
+            settings.long_audio_overlap_seconds,
+            workdir,
+            settings.audio_bitrate,
+        )
+    else:
+        parts = slice_long_audio_parts(
+            audio_path,
+            duration,
+            part_seconds,
+            settings.long_audio_overlap_seconds,
+            workdir,
+            settings.audio_bitrate,
+        )
+    all_segments: list[tuple[float, float, str]] = []
+    for idx, part in enumerate(parts):
+        part_workdir = workdir / f"long_part_work_{idx:04d}"
+        part_workdir.mkdir(parents=True, exist_ok=True)
+        label = f"part {idx + 1}/{len(parts)} {format_timestamp(part.offset)}-{format_timestamp(part.offset + part.duration)}"
+        log(f"Transcribing long-audio {label}")
+        part_segments = transcribe_with_bcut_chunked(settings, part.path, part.duration, part_workdir)
+        all_segments.extend(offset_segments(part_segments, part.offset))
+        log(f"   Long-audio part {idx + 1}/{len(parts)} done: {len(part_segments)} segments")
+
+    merged = merge_overlapped_segments(
+        all_segments,
+        max(settings.long_audio_overlap_seconds, settings.free_asr_overlap_seconds),
+    )
+    log(f"Long-audio merge complete: {len(all_segments)} segments -> {len(merged)} segments")
+    return merged
+
+
+def should_split_long_audio_output(settings: Settings, duration: float) -> bool:
+    """是否在输出阶段拆 markdown 为上下集。与 upstream 3b83f33 一致。"""
+    if settings.long_audio_threshold_minutes <= 0:
+        return False
+    return duration > settings.long_audio_threshold_minutes * 60
+
+
+def split_segments_in_halves(
+    segments: list[tuple[float, float, str]],
+    duration: float,
+) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], float]:
+    """按中点拆 segments 为两半。与 upstream 3b83f33 一致。"""
+    midpoint = duration / 2
+    first = [segment for segment in segments if segment[0] < midpoint]
+    second = [segment for segment in segments if segment[0] >= midpoint]
+    if not first or not second:
+        half = max(1, len(segments) // 2)
+        first = segments[:half]
+        second = segments[half:]
+    return first, second, midpoint
+
+
+def part_output_path(output_path: Path, suffix: str) -> Path:
+    """输出文件名加后缀: foo.md -> foo_上集.md。与 upstream 3b83f33 一致。"""
+    return output_path.with_name(f"{output_path.stem}_{suffix}{output_path.suffix}")
+
+
 def jianying_tdid() -> str:
     year_digit = str(datetime.now().year)[3]
     prefix = 390 + int(year_digit)
@@ -1102,7 +1352,9 @@ def transcribe_with_provider(
     workdir: Path,
 ) -> list[tuple[float, float, str]]:
     if settings.asr_provider == "bcut":
-        return transcribe_with_bcut_chunked(settings, mono_path, duration, workdir)
+        # ahead 2 + 3b83f33：长音频自动调 transcribe_with_bcut_long_parts（里面会按 duration
+        # 决定是否切分）；短音频调 transcribe_with_bcut_chunked
+        return transcribe_with_bcut_long_parts(settings, mono_path, duration, workdir)
     if settings.asr_provider == "jianying":
         return transcribe_with_jianying(mono_path, duration)
     raise RuntimeError(f"未知 ASR provider: {settings.asr_provider}")
@@ -1297,22 +1549,52 @@ def transcribe_episode(
         if output_path is None:
             output_path = Path.cwd() / f"{sanitize_filename(meta.title)}.md"
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        write_markdown(
-            output_path,
-            meta,
-            source_url,
-            duration,
-            segments,
-            provider_display_name(settings),
-            chapters=chapters if chapters_enabled else None,
-        )
+
+        # ahead 2 + 3b83f33：长音频拆分为上下集（写入独立 md 文件）
+        if should_split_long_audio_output(settings, duration):
+            first_segments, second_segments, midpoint = split_segments_in_halves(segments, duration)
+            first_path = part_output_path(output_path, "上集")
+            second_path = part_output_path(output_path, "下集")
+            log(f"📚 长音频输出拆分: {first_path.name} + {second_path.name}")
+            write_markdown(
+                first_path,
+                _with_title_suffix(meta, "（上集）"),
+                source_url,
+                duration,
+                first_segments,
+                provider_display_name(settings),
+                chapters=build_chapters(first_segments, window_seconds=chapter_window) if chapters_enabled else None,
+            )
+            write_markdown(
+                second_path,
+                _with_title_suffix(meta, "（下集）"),
+                source_url,
+                duration,
+                second_segments,
+                provider_display_name(settings),
+                chapters=build_chapters(second_segments, window_seconds=chapter_window) if chapters_enabled else None,
+            )
+            output_paths = (first_path, second_path)
+            output_path = first_path  # 退回原始行为: TranscribeResult.output_path = first part
+        else:
+            write_markdown(
+                output_path,
+                meta,
+                source_url,
+                duration,
+                segments,
+                provider_display_name(settings),
+                chapters=chapters if chapters_enabled else None,
+            )
+            output_paths = (output_path,)
 
         if summary_mode:
             log("📝 脚本已完成转录；请让本地 Agent 基于全文稿生成摘要。")
 
         transcript_text = segments_to_index_text(segments)
         log(f"\n✅ 完成! 总耗时: {time.time() - t0:.1f}s")
-        log(f"📄 输出: {output_path.resolve()}")
+        for p in output_paths:
+            log(f"📄 输出: {p.resolve()}")
         log(f"📊 时长 {format_timestamp(duration)} | {len(segments)} 段 | "
             f"{sum(len(s[2]) for s in segments)} 字")
 
@@ -2375,6 +2657,14 @@ def rss_main(argv: list[str]) -> int:
                                    help=f"免费 ASR 切片重叠秒数,默认 {DEFAULT_FREE_ASR_OVERLAP_SECONDS}")
     transcribe_parser.add_argument("--free-asr-workers", type=int, default=None,
                                    help=f"免费 ASR 分片并发数,默认 {DEFAULT_FREE_ASR_WORKERS}")
+    transcribe_parser.add_argument("--long-audio-threshold-minutes", type=int, default=None,
+                                   help=f"Enable long-audio pre-split above this many minutes, default {DEFAULT_LONG_AUDIO_THRESHOLD_MINUTES}; 0 disables")
+    transcribe_parser.add_argument("--long-audio-parts", type=int, default=None,
+                                   help=f"Split very long audio into this many large parts before ASR, default {DEFAULT_LONG_AUDIO_PARTS}; 0 uses minutes")
+    transcribe_parser.add_argument("--long-audio-part-minutes", type=int, default=None,
+                                   help=f"Long-audio pre-split part length in minutes, default {DEFAULT_LONG_AUDIO_PART_MINUTES}")
+    transcribe_parser.add_argument("--long-audio-overlap-seconds", type=int, default=None,
+                                   help=f"Long-audio pre-split overlap seconds, default {DEFAULT_LONG_AUDIO_OVERLAP_SECONDS}")
     transcribe_parser.add_argument("--audio-bitrate", default=None,
                                    help=f"转码后的音频码率,默认 {AUDIO_BITRATE}")
     transcribe_parser.add_argument("--keep-audio", action=argparse.BooleanOptionalAction,
@@ -2476,6 +2766,14 @@ def main() -> int:
                         help=f"免费 ASR 切片重叠秒数,默认 {DEFAULT_FREE_ASR_OVERLAP_SECONDS}")
     parser.add_argument("--free-asr-workers", type=int, default=None,
                         help=f"免费 ASR 分片并发数,默认 {DEFAULT_FREE_ASR_WORKERS}")
+    parser.add_argument("--long-audio-threshold-minutes", type=int, default=None,
+                        help=f"Enable long-audio pre-split above this many minutes, default {DEFAULT_LONG_AUDIO_THRESHOLD_MINUTES}; 0 disables")
+    parser.add_argument("--long-audio-parts", type=int, default=None,
+                        help=f"Split very long audio into this many large parts before ASR, default {DEFAULT_LONG_AUDIO_PARTS}; 0 uses minutes")
+    parser.add_argument("--long-audio-part-minutes", type=int, default=None,
+                        help=f"Long-audio pre-split part length in minutes, default {DEFAULT_LONG_AUDIO_PART_MINUTES}")
+    parser.add_argument("--long-audio-overlap-seconds", type=int, default=None,
+                        help=f"Long-audio pre-split overlap seconds, default {DEFAULT_LONG_AUDIO_OVERLAP_SECONDS}")
     parser.add_argument("--audio-bitrate", default=None,
                         help=f"转码后的音频码率,默认 {AUDIO_BITRATE}")
     parser.add_argument("--keep-audio", action=argparse.BooleanOptionalAction,
