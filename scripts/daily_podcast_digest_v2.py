@@ -154,6 +154,11 @@ def is_recently_picked(podcast_name: str, days: int = 2) -> bool:
     2026-07-22 修复：传入的 podcast_name 是 raw 半角 | 形式，last_picked.json
     用 _safe_podcast_dirname 归一化（全角 ｜）后存入。比对时同步归一化，避免漏判。
     同时兼容历史的 raw 半角 key（迁移期）。
+
+    2026-07-27 调整 (丽哥决策 A 方案): days=2 → days=3
+    原因: days=2 与 days=4 之间空了 2 天，结果"刚转过 1 天的活跃源"被挡死，
+          导致连跑日（周六/周日）候选池清零 → 周一只剩 1 集。
+    验证: 7-27 只产出 1 集（All-In），证明机制有 bug。
     """
     data = load_last_picked()
     safe_name = _safe_podcast_dirname(podcast_name)
@@ -461,7 +466,7 @@ def select_episodes(subscriptions):
             # v2.0 (2026-07-06): last_picked 黑名单
             # 2026-07-21 丽哥要求: 放宽黑名单，最近 2 天才硬过滤
             # 之前 days=4 太严，导致 7 天 backfill 几乎只能选英文/冷门
-            if is_recently_picked(podcast_name, days=2):
+            if is_recently_picked(podcast_name, days=3):
                 log(f"    ⏭️ 跳过近 2 天已选: {podcast_name}")
                 continue
             # 2026-07-21: 英文播客每天最多 1 集
@@ -513,7 +518,7 @@ def select_episodes(subscriptions):
             if any(s['podcast'] == name for s in selected):
                 continue
             # v2.0 (2026-07-06): last_picked 黑名单 - 2 天内已选过的播客跳过
-            if is_recently_picked(name, days=2):
+            if is_recently_picked(name, days=3):
                 continue
             # 2026-07-21: 英文播客每天最多 1 集
             if not has_chinese_chars(name) and english_count >= MAX_ENGLISH_PER_DAY:
