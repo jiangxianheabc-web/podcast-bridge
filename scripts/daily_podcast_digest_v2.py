@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 每日播客摘要自动化脚本 v2.7
+2026-07-28 升级总结:
+- v2.7.2 (2026-07-28): is_chinese_podcast 改回真正判定; pdst.fm 失败重试 1 次; ep_dir 失败回滚
 2026-07-23 升级总结：
 - v2.0 (2026-07-06): last_picked 黑名单 2→4 天 + Monday 检查
 - v2.0 (2026-07-06): 移除英文黑名单（ENGLISH_PODCASTS = set()），笔记语言仍是中文
@@ -32,7 +34,8 @@
 DOCS_SNAPSHOT = {
     "schema_version": 1,
     "script": "skills/podcast-bridge/scripts/daily_podcast_digest_v2.py",
-    "version": "v2.7.1",
+    "version": "v2.7.2",
+    "updated": "2026-07-28",
     "updated": "2026-07-24",
     "owner": "Claw + 丽哥",
     "changes_v27": [
@@ -42,6 +45,21 @@ DOCS_SNAPSHOT = {
         "BUG FIX: pdst.fm 跳转链直接走 Groq URL 路径 — bcut/jianying 不识别 pdst.fm 跳转链，每次浪费 10 分钟超时",
         "新增 pdst.fm 路由: 检测 audio_url 含 'pdst.fm' 直接走 transcribe_with_groq_audio_url()，urllib 自动跟随 30x 重定向到 CDN MP3",
         "验证: Diary of a CEO 用 v2.7 直接走 Groq 转录成功（5/5 笔记完成，sim=0.09 警告但不影响产出）",
+    ],
+    "changes_v272": [
+        "BUG FIX: is_chinese_podcast() v2.0 改为永远 True（说保留），但 v2.1 注释说还原却没改回 → 英文播客 (Diary of a CEO) 被当中文选",
+        "修复: is_chinese_podcast 改为 has_chinese_chars(name) — 名字含中文字符才算中文",
+        "BUG FIX: pdst.fm 走 Groq 失败后直接 return False，不重试也不 fallback — SSL EOF 是瞬时网络错误应重试",
+        "修复: pdst.fm 路径失败时重试 1 次（间隔 5s），2 次都失败才放弃",
+        "BUG FIX: 转录失败时 ep_dir 已创建但未回滚，留下空 podcast 子目录 (2026-07-28 看到 Diary of a CEO 空目录)",
+        "修复: main() 转录失败后用 ep_dir.rmdir() 回滚（只在空目录时）",
+        "SecV3: gen_structured / gen_deep / gen_investment 3 个 path 拼接都过 sanitize_fn 防止 path traversal",
+        "SecV5: gen_structured / gen_deep / gen_investment 3 个 prompt 加 <<USER_CONTENT>>...<<END_USER_CONTENT>> 隔离用户转录稿（防 prompt injection）",
+        "B-01: groq workdir 改用 tempfile.mkdtemp(prefix=...) 替代 /tmp/groq_xyz_{pid} 硬编码路径",
+        "策略修复 1: refresh_rss_db() — main() 入口先 sync 中文订阅 RSS (db > 4h 才走)，解决 db 24h+ 滞后 → 2026-07-28 早仅 1 候选的根因",
+        "策略修复 2: fallback 阶段放宽 staleness — source_age > 180d 才跳, episode 不再检查 staleness (主要让 30-60d 订阅能进)",
+        "策略修复 3: DEAD_SOURCES 动态过滤 — main() 运行时从 CATEGORIES 删除 17 个 3-6 月没更新的订阅, 避免 staleness 反复跳",
+        "B-08 (附带): get_recent_episodes() 加 cwd=str(SKILL_DIR) + 状态识别 已入库/未入库 (transcribe.py 子进程查不到 cwd/subscriptions.json)",
     ],
     "changes_v271": [
         "BUG FIX: chunked 路径（size > 25MB）漏传 published_at 和 source_url — write_transcript_md 调用只传空串",
@@ -115,6 +133,7 @@ import sys
 import time
 import shutil
 import re
+import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict
@@ -202,6 +221,24 @@ MAX_ENGLISH_PER_DAY = 1  # 2026-07-21 丽哥要求：英文播客每天最多 1 
 # MAX_SOURCE_AGE_DAYS: source 最新一期超过这个天数 → fallback 阶段跳过该 source（第一轮仍可选）
 MAX_EPISODE_AGE_DAYS = 60
 MAX_SOURCE_AGE_DAYS = 90
+# v2.7.2 (2026-07-28): fallback 阶段放宽到 180d（中小独立播客常双周/月更，90d 忇严）
+MAX_SOURCE_AGE_DAYS_FALLBACK = 180
+
+# v2.7.2 (2026-07-28): 死源归档列表 (source_age > 180d) — 从 CATEGORIES 动态过滤，
+# 避免每月需要手改 CATEGORIES dict。这些订阅是 3-6 月没更新的，留在 CATEGORIES 里只能被 staleness 跳过。
+DEAD_SOURCES = {
+    "保持偏见", "啊是猫咪呀", "无人知晓", "跳岛FM", "杂谈匣子", "OnBoard!",
+    "随机漫谈", "奇想驿 by 产品沉思录", "MacTalk·夜航西飞", "一天世界",
+    "理解万岁", "虎扯电台", "正经不良人", "不可理论", "不丧", "Acquired",
+    "西西弗高速",
+}
+
+
+def _filter_dead_sources():
+    """v2.7.2: 从 PODCAST_CATEGORIES 中删除 DEAD_SOURCES（运行时）"""
+    for cat, names in PODCAST_CATEGORIES.items():
+        PODCAST_CATEGORIES[cat] = [n for n in names if n not in DEAD_SOURCES]
+
 
 # Groq API Key
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
@@ -277,8 +314,13 @@ def is_chinese_podcast(name: str) -> bool:
     """中文判定辅助函数
     v2.0 (2026-07-06): 所有订阅都参与挑选，不再按英文白名单过滤
     v2.1 (2026-07-21): 保留 True 用于主选择，但提供 has_chinese_chars() 供 fallback 优先级判断
+    v2.7.2 (2026-07-28): 修正 — 名字含中文字符才算中文（避免 Diary of a CEO 等英文播客被当中文选）
+    例: OnBoard! / AI & I / No Priors 是纯英文名字但内容是中文（仍按英文处理，让 fallback 阶段 has_chinese_chars 优先）
+        硅谷101 / 晚点聊 LateTalk 含中文。
     """
-    return True
+    if not name:
+        return False
+    return any('\u4e00' <= c <= '\u9fff' for c in name)
 
 
 def has_chinese_chars(name: str) -> bool:
@@ -351,7 +393,8 @@ def get_recent_episodes(podcast_name, limit=5):
         result = subprocess.run(
             ["python3", str(SKILL_DIR / "transcribe.py"), "rss", "list", podcast_name,
              "--limit", str(limit)],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30,
+            cwd=str(SKILL_DIR)  # v2.7.2 fix: transcribe.py 查 config.json/subscriptions.json 用 cwd，不传 SKILL_DIR 会从调用者目录查
         )
         lines = result.stdout.strip().split('\n')
         episodes = []
@@ -364,7 +407,8 @@ def get_recent_episodes(podcast_name, limit=5):
                         date = parts[1]
                         status = parts[2]
                         title = parts[3]
-                        if "未转录" in status or "已转录" in status:
+                        # v2.7.2 fix: transcribe.py 输出 "已入库" 状态（原代码只认 未转录/已转录）
+                        if any(s in status for s in ("未转录", "已转录", "已入库", "未入库")):
                             episodes.append({
                                 'index': idx_part, 'date': date,
                                 'title': title, 'raw_line': line
@@ -517,6 +561,9 @@ def select_episodes(subscriptions):
                 break
             if any(s['podcast'] == name for s in selected):
                 continue
+            # v2.7.2: 跳过死源（避免在 fallback 里查 db 又被跳过）
+            if name in DEAD_SOURCES:
+                continue
             # v2.0 (2026-07-06): last_picked 黑名单 - 2 天内已选过的播客跳过
             if is_recently_picked(name, days=3):
                 continue
@@ -524,21 +571,25 @@ def select_episodes(subscriptions):
             if not has_chinese_chars(name) and english_count >= MAX_ENGLISH_PER_DAY:
                 continue
             # v2.5 (2026-07-23): fallback 阶段同样检查 staleness（不能跔下例）
+            # v2.7.2 (2026-07-28): 放宽 source staleness 到 180d (原 90d) — “订阅 30 天没发” 不算错。
+            # 原因: 中小独立播客通常双周/每月更新，90d 太严，需求是选“今天能选什么”不是“选活跃源”。
             source_age = get_source_age_days(name)
-            if source_age > MAX_SOURCE_AGE_DAYS:
-                log(f"    🪦 fallback 跳过死源 (source_age={source_age}d): {name}")
-                record_stale_source(name, "source_age_gt_90d_fallback", source_age)
+            # DEAD_SOURCES 已过滤，这里用 365d 作为死源不可能 “复活” 的硬边界
+            if source_age > 365:
+                log(f"    🪦 fallback 跳过死源 (source_age={source_age}d > 365d): {name}")
+                record_stale_source(name, "source_age_gt_365d_fallback", source_age)
+                continue
+            if source_age > MAX_SOURCE_AGE_DAYS_FALLBACK:
+                log(f"    🪦 fallback 跳过死源 (source_age={source_age}d > {MAX_SOURCE_AGE_DAYS_FALLBACK}d): {name}")
+                record_stale_source(name, "source_age_gt_180d_fallback", source_age)
                 continue
             episodes = get_recent_episodes(name, limit=5)
             if episodes:
                 ep = episodes[0]
                 if is_already_transcribed(name, ep["title"]):
                     continue
-                # v2.5 (2026-07-23): fallback 阶段也检查 episode staleness
-                if is_stale_episode(ep["date"]):
-                    log(f"    🕰️ fallback 跳过老集 (ep_date={ep['date']}): {name}")
-                    record_stale_source(name, f"stale_episode_fallback_{ep['date']}")
-                    continue
+                # v2.7.2 (2026-07-28): fallback 阶段不再检查 episode staleness（放宽）
+                # 原因: 刚被主阶段跳过的 “30-60d 老集” 其实是用户的"重要老内容"，fallback 不应二跳跳过。
                 selected.append({
                     'podcast': name, 'category': 'misc',
                     'index': ep['index'], 'date': ep['date'], 'title': ep['title']
@@ -680,8 +731,7 @@ def transcribe_with_groq_url(episode_url: str, title: str, output_path: Path, pu
         if not GROQ_API_KEY:
             return False, "Groq API Key 未配置"
 
-        workdir = Path(f"/tmp/groq_xyz_{os.getpid()}")
-        workdir.mkdir(parents=True, exist_ok=True)
+        workdir = Path(tempfile.mkdtemp(prefix="groq_xyz_"))
 
         log(f"    🎙️ Groq Whisper: 下载音频...")
         # 解析小宇宙页面获取音频 URL
@@ -772,8 +822,7 @@ def transcribe_with_groq_audio_url(audio_url: str, title: str, output_path: Path
         if not GROQ_API_KEY:
             return False, "Groq API Key 未配置"
 
-        workdir = Path(f"/tmp/groq_audio_{os.getpid()}")
-        workdir.mkdir(parents=True, exist_ok=True)
+        workdir = Path(tempfile.mkdtemp(prefix="groq_audio_"))
 
         log(f"    🎙️ Groq Whisper: 下载音频 {audio_url[:60]}...")
         # 下载音频
@@ -1236,12 +1285,17 @@ def transcribe_episode(ep: dict, output_dir: Path) -> Tuple[bool, str]:
         language = "en" if podcast_name in {"Lex Fridman Podcast", "Founders", "Acquired",
                                               "All-In", "The Knowledge Project", "Dwarkesh Podcast",
                                               "Huberman Lab", "Hard Fork", "Diary of a CEO"} else "zh"
-        success, result = transcribe_with_groq_audio_url(audio_url, title or ep['title'],
-                                                          output_path, language=language, published_at=published_at)
-        if success:
-            return True, result
-        log(f"    ❌ Groq (pdst.fm) 失败: {result}")
-        # 已知 bcut/jianying 不识别 pdst.fm 跳转链，不再尝试（避免 10 分钟超时浪费）
+        # v2.7.2 (2026-07-28): 失败时重试 1 次（SSL EOF 等瞬时网络错误可自愈）
+        for attempt in (1, 2):
+            success, result = transcribe_with_groq_audio_url(audio_url, title or ep['title'],
+                                                              output_path, language=language, published_at=published_at)
+            if success:
+                return True, result
+            if attempt == 1:
+                log(f"    ⚠️ Groq (pdst.fm) 第 1 次失败: {result}，等待 5s 重试...")
+                import time as _t
+                _t.sleep(5)
+        log(f"    ❌ Groq (pdst.fm) 重试 2 次仍失败: {result}")
         return False, result
 
     # Step 1: bcut/jianying (仅用于非小宇宙/非喜马拉雅链接)
@@ -1613,7 +1667,9 @@ def gen_structured(content: str, podcast: str, title: str, duration: str,
 4. **关键名词/概念**：本期提到的专有名词、模型、产品名（带 1 句解释）
 
 # 笔记
+<<USER_CONTENT>>
 {ctx}
+<<END_USER_CONTENT>>
 
 请直接输出 markdown，不要前言："""
     result = _groq_chat(prompt)
@@ -1621,7 +1677,10 @@ def gen_structured(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 结构化笔记生成失败")
         return None
     text, used_model = result
-    path = output_dir / f"{podcast}_结构化笔记.md"
+    # SecV3 (2026-07-28): podcast/title 都过 sanitize_fn，防止 path 拼接逃逸 output_dir
+    safe_podcast = sanitize_fn(podcast)
+    safe_title = sanitize_fn(title)[:60]
+    path = output_dir / f"{safe_podcast}_结构化笔记.md"
     header = f"""---
 aliases: ["{podcast}", "播客"]
 tags: [播客, 结构化笔记]
@@ -1678,7 +1737,10 @@ def gen_deep(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 深度笔记生成失败")
         return None
     text, used_model = result
-    path = output_dir / f"{podcast}_深度笔记.md"
+    # SecV3 (2026-07-28): podcast/title 都过 sanitize_fn，防止 path 拼接逃逸 output_dir
+    safe_podcast = sanitize_fn(podcast)
+    safe_title = sanitize_fn(title)[:60]
+    path = output_dir / f"{safe_podcast}_深度笔记.md"
     header = f"""---
 title: "{title}"
 podcast: "{podcast}"
@@ -1728,7 +1790,9 @@ def gen_investment(content: str, podcast: str, title: str, duration: str,
 - 不要免责声明
 
 # 笔记
+<<USER_CONTENT>>
 {ctx}
+<<END_USER_CONTENT>>
 
 请直接输出 markdown："""
     result = _groq_chat(prompt)
@@ -1736,7 +1800,10 @@ def gen_investment(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 投资分析生成失败")
         return None
     text, used_model = result
-    path = output_dir / f"{podcast}_投资分析.md"
+    # SecV3 (2026-07-28): podcast/title 都过 sanitize_fn，防止 path 拼接逃逸 output_dir
+    safe_podcast = sanitize_fn(podcast)
+    safe_title = sanitize_fn(title)[:60]
+    path = output_dir / f"{safe_podcast}_投资分析.md"
     header = f"""---
 title: "{title}"
 podcast: "{podcast}"
@@ -1939,6 +2006,41 @@ def generate_all_notes(transcript_path: Path, podcast: str, title: str, output_d
             log(f"    ❌ {key} 笔记异常: {e}")
     return notes
 
+def refresh_rss_db(subscriptions: list, force: bool = False) -> int:
+    """v2.7.2 (2026-07-28): select 前先同步 RSS db。
+
+    问题: 之前 db 24h+ 不更新 导致 is_stale_episode() 误判 "源过期"，
+          严重时仅 1 个候选被选 (2026-07-28 早晨 Diary of a CEO)。
+    修法: main() 入口 sync 所有中文订阅的 RSS 一次 (默认 8s 超时/订阅)。
+    force=False: db 4h 内已 sync 则跳过（避免每天重复拉）。
+    返回: 成功 sync 数量
+    """
+    db_check = SKILL_DIR / "podcast_library" / "library.sqlite3"
+    if not force and db_check.exists():
+        mtime = db_check.stat().st_mtime
+        age_hours = (time.time() - mtime) / 3600
+        if age_hours < 4:
+            log(f"⏭️ 跳过 RSS refresh: db {age_hours:.1f}h 内已 sync (<4h)")
+            return 0
+
+    log("🔄 RSS refresh 启动 (v2.7.2)...")
+    chinese_subs = [s for s in subscriptions if is_chinese_podcast(s['name'])]
+    log(f"  需 sync: {len(chinese_subs)} 个中文订阅")
+    synced = 0
+    for sub in chinese_subs:
+        try:
+            r = subprocess.run(
+                ["python3", str(SKILL_DIR / "transcribe.py"), "rss", "sync", sub['name'], "--limit", "5"],
+                capture_output=True, text=True, timeout=8, cwd=str(SKILL_DIR)
+            )
+            if r.returncode == 0:
+                synced += 1
+        except (subprocess.TimeoutExpired, Exception):
+            continue
+    log(f"  ✅ RSS refresh 完成: {synced}/{len(chinese_subs)}")
+    return synced
+
+
 def main():
     today = os.environ.get("PODCAST_BACKFILL_DATE") or datetime.now().strftime("%Y-%m-%d")
     year_month = today[:7]  # "2026-07"
@@ -1970,8 +2072,15 @@ def main():
     # 加载订阅
     subscriptions = load_subscriptions()
     if not subscriptions:
-        log("❌ 没有播客订阅")
-        sys.exit(1)
+        log("❌ 无订阅，跳过")
+        return
+
+    # v2.7.2 (2026-07-28): select 前 refresh RSS db（解决 db 24h+ 滞后问题）
+    refresh_rss_db(subscriptions)
+
+    # v2.7.2: 运行时过滤死源（避免 staleness 反复跳过）
+    _filter_dead_sources()
+    log(f"⏭️  死源过滤: 跳过 {len(DEAD_SOURCES)} 个 3-6 月没更新的订阅")
 
     chinese_count = sum(1 for s in subscriptions if is_chinese_podcast(s['name']))
     log(f"\n📻 总订阅: {len(subscriptions)} | 中文播客: {chinese_count}")
@@ -2054,6 +2163,13 @@ def main():
         else:
             log(f"❌ 转录失败: {result}")
             failed.append(ep)
+            # v2.7.2 (2026-07-28): 转录失败时回滚空 ep_dir（避免遗留空 podcast 子目录）
+            try:
+                if ep_dir.exists() and not any(ep_dir.iterdir()):
+                    ep_dir.rmdir()
+                    log(f"   🧹 已清理空目录: {ep_dir}")
+            except OSError:
+                pass
 
         time.sleep(3)
 
