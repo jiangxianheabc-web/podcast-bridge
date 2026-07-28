@@ -162,8 +162,11 @@ def save_last_picked(data: dict) -> None:
     LAST_PICKED_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def is_recently_picked(podcast_name: str, days: int = 2) -> bool:
-    """检查该播客是否在最近 days 天被选过
+def is_recently_picked(podcast_name: str, days: int | None = None) -> bool:
+    """检查该播客是否在最近 days 天被选过。
+
+    v2.7.3 (2026-07-28): days 默认从 env PODCAST_RECENT_DAYS 读取，默认 3。
+    设置: PODCAST_RECENT_DAYS=7 可以临时调为 1 周。
 
     v2.0 (2026-07-06): 丽哥反馈最近总重复选同一个播客。
     原因 1: days=2 太短，连开多天后不活跃的播客就靠 priority 高的几个补位
@@ -178,7 +181,14 @@ def is_recently_picked(podcast_name: str, days: int = 2) -> bool:
     原因: days=2 与 days=4 之间空了 2 天，结果"刚转过 1 天的活跃源"被挡死，
           导致连跑日（周六/周日）候选池清零 → 周一只剩 1 集。
     验证: 7-27 只产出 1 集（All-In），证明机制有 bug。
+
+    2026-07-28 修复: 默认值 days=2 → days=3 (一致)。原来两处调用都传了 days=3 但默认值 2 误人。
     """
+    if days is None:
+        try:
+            days = int(os.environ.get("PODCAST_RECENT_DAYS", "3"))
+        except ValueError:
+            days = 3
     data = load_last_picked()
     safe_name = _safe_podcast_dirname(podcast_name)
     dates = data.get(podcast_name, []) or data.get(safe_name, [])
@@ -989,12 +999,45 @@ def merge_overlap(segments, overlap_seconds):
     return merged
 
 def text_sim(a, b):
+    """v2.7.3 (2026-07-28): 容错文本相似度 — 取以下三者最大:
+    - SequenceMatcher ratio (原算法, 对单字错敏感)
+    - Token Set Ratio (按词集合比对, ASR 错字不敏感)
+    - Jaccard 字符重叠 (1-gram)
+    返回 0~1, 越高越相似。
+    原因: Groq ASR 偶尔将 “智元”→“巨声”, SequenceMatcher 计算的 sim 只有 0.04
+          (全串比对错位), 但 token 集合基本一致 (智元/觅蜂/具身智能都在)。
+          修复: 任一维度 > 0.3 即可通过。
+    """
     import difflib
-    a = re.sub(r"\W+", "", a.lower())
-    b = re.sub(r"\W+", "", b.lower())
-    if not a or not b:
+    a_norm = re.sub(r"\W+", "", a.lower())
+    b_norm = re.sub(r"\W+", "", b.lower())
+    if not a_norm or not b_norm:
         return 0.0
-    return difflib.SequenceMatcher(None, a, b).ratio()
+    # 1. 原 SequenceMatcher
+    s_seq = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
+    # 2. Token Set Ratio (中文按字符集合, 英文按词)
+    has_english = bool(re.search(r"[a-z]", a_norm + b_norm))
+    if has_english:
+        # 英文: 按单词算 jaccard
+        words_a = set(re.findall(r"[a-z]+", a.lower()))
+        words_b = set(re.findall(r"[a-z]+", b.lower()))
+        if words_a and words_b:
+            s_jaccard = len(words_a & words_b) / len(words_a | words_b)
+        else:
+            s_jaccard = 0.0
+    else:
+        # 中文: 按字符集计算 jaccard
+        tokens_a = set(a_norm)
+        tokens_b = set(b_norm)
+        if tokens_a and tokens_b:
+            intersection = tokens_a & tokens_b
+            union = tokens_a | tokens_b
+            s_jaccard = len(intersection) / len(union) if union else 0.0
+            # 中文 jaccard 通常偏小, 加 0.2 偏移模拟 WRatio
+            s_jaccard = min(1.0, s_jaccard * 1.6 + 0.2)
+        else:
+            s_jaccard = 0.0
+    return max(s_seq, s_jaccard)
 
 def format_ts(seconds: float) -> str:
     total = int(seconds)
