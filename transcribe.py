@@ -1359,6 +1359,53 @@ def transcribe_with_provider(
         return transcribe_with_jianying(mono_path, duration)
     raise RuntimeError(f"未知 ASR provider: {settings.asr_provider}")
 
+
+# 🆕 2026-07-30 P1.1: ASR 横向熔断 fallback_chain
+# 问题: 原设计 asr_provider 单选, Bcut 412 后需手动改 provider 重跑
+# 改进: 调用 transcribe_with_fallback() 时传 fallback_chain, 失败自动尝试下一个
+# 例: fallback_chain=("bcut", "jianying") → Bcut 412 报错 → 尝试 Jianying
+# groq 路径复用 daily_podcast_digest_v2.transcribe_with_groq_url (跨脚本 import),
+# 但 transcribe.py 缺 audio_url 路径, 当前 fallback chain 不含 groq (后续 PR 补).
+
+ASR_FALLBACK_CHAIN_DEFAULT = ("bcut", "jianying")  # 默认 chain: Bcut → Jianying
+
+def transcribe_with_fallback(
+    settings: Settings,
+    mono_path: Path,
+    duration: float,
+    workdir: Path,
+    fallback_chain: tuple[str, ...] | None = None,
+) -> tuple[list[tuple[float, float, str]], str]:
+    """🆕 P1.1: 横向熔断 fallback chain.
+
+    Returns: (segments, used_provider) — used_provider 是实际成功的 provider 名.
+    Raises: 全部 provider 都失败时 raise 最后一个 RuntimeError.
+
+    Args:
+        fallback_chain: 显式 fallback chain, 优先级高于 settings.asr_provider.
+                        None 时默认 chain = (settings.asr_provider,) (不退避).
+    """
+    if fallback_chain is None:
+        # 默认行为: 不退避, 只用 settings.asr_provider (向后兼容)
+        fallback_chain = (settings.asr_provider,)
+
+    last_exc: Exception | None = None
+    for provider in fallback_chain:
+        # 动态构造临时 settings (只改 asr_provider, frozen dataclass 用 replace)
+        from dataclasses import replace
+        trial = replace(settings, asr_provider=provider)
+        try:
+            log(f"   🔄 ASR fallback: 尝试 {provider}")
+            segments = transcribe_with_provider(trial, mono_path, duration, workdir)
+            if segments:
+                log(f"   ✅ ASR fallback: {provider} 成功 ({len(segments)} segments)")
+                return segments, provider
+        except Exception as e:
+            last_exc = e
+            log(f"   ⚠️  ASR fallback: {provider} 失败: {str(e)[:200]}")
+            continue
+    raise RuntimeError(f"ASR fallback chain {fallback_chain} 全部失败; last error: {last_exc}")
+
 def provider_display_name(settings: Settings) -> str:
     if settings.asr_provider == "bcut":
         return "BcutASR (必剪)"
@@ -2651,6 +2698,9 @@ def rss_main(argv: list[str]) -> int:
                                    help=f"分段时长(秒),默认 {DEFAULT_SEGMENT_SECONDS}")
     transcribe_parser.add_argument("--asr-provider", choices=ASR_PROVIDERS, default=None,
                                    help=f"ASR 引擎,默认 {DEFAULT_ASR_PROVIDER}; bcut/jianying 免费免配置")
+    # 🆕 2026-07-30 P1.1: fallback chain CLI
+    transcribe_parser.add_argument("--asr-fallback-chain", default=None,
+                                   help="ASR 横向熔断 fallback chain (逗号分隔), 例: bcut,jianying,groq")
     transcribe_parser.add_argument("--free-asr-chunk-minutes", type=int, default=None,
                                    help=f"免费 ASR 长音频切片分钟数,默认 {DEFAULT_FREE_ASR_CHUNK_MINUTES}")
     transcribe_parser.add_argument("--free-asr-overlap-seconds", type=int, default=None,
@@ -2760,6 +2810,9 @@ def main() -> int:
                         help=f"分段时长(秒),默认 {DEFAULT_SEGMENT_SECONDS}")
     parser.add_argument("--asr-provider", choices=ASR_PROVIDERS, default=None,
                         help=f"ASR 引擎,默认 {DEFAULT_ASR_PROVIDER}; bcut/jianying 免费免配置")
+    # 🆕 2026-07-30 P1.1: fallback chain CLI (顶层 parser + transcribe subparser)
+    parser.add_argument("--asr-fallback-chain", default=None,
+                        help="ASR 横向熔断 fallback chain (逗号分隔), 例: bcut,jianying,groq")
     parser.add_argument("--free-asr-chunk-minutes", type=int, default=None,
                         help=f"免费 ASR 长音频切片分钟数,默认 {DEFAULT_FREE_ASR_CHUNK_MINUTES}")
     parser.add_argument("--free-asr-overlap-seconds", type=int, default=None,
