@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-每日播客摘要自动化脚本 v2.7
+每日播客摘要自动化脚本 v2.8
+2026-08-10 升级总结:
+- v2.8 (2026-08-10): 丽哥指令：每天必须 5 集。
+  - 小宇宙/喜马拉雅 Groq 路径加 retry 3 次（10s/30s 退避），治 Groq 403 Access denied 瞬时错误
+  - main 末尾若成功 < MAX_EPISODES，同进程 retry 1 次 failed 列表（走 Groq audio_url，30s 退避）
+  - 仍失败写 state/podcast-bridge/unfilled_<date>.json 供 07:00 报告标记
 2026-07-28 升级总结:
 - v2.7.2 (2026-07-28): is_chinese_podcast 改回真正判定; pdst.fm 失败重试 1 次; ep_dir 失败回滚
 2026-07-23 升级总结：
@@ -34,11 +39,16 @@
 DOCS_SNAPSHOT = {
     "schema_version": 1,
     "script": "skills/podcast-bridge/scripts/daily_podcast_digest_v2.py",
-    "version": "v2.7.2",
-    "updated": "2026-07-28",
-    "updated": "2026-07-24",
+    "version": "v2.7.3",
+    "updated": "2026-07-29",
     "owner": "Claw + 丽哥",
     "changes_v27": [
+        "v2.7.3 (2026-07-28): text_sim 算法升级 + is_recently_picked 默认值修复（commit 3570504）",
+        "  - text_sim: 字符集 jaccard + 偏移，中文 ASR 错字 0.04 → 0.71",
+        "  - is_recently_picked 默认值 None → 读 PODCAST_RECENT_DAYS env（默认 3）",
+        "  - 默认 days 一致性（2 → None）",
+        "v2.7.2 (2026-07-24): P0 + 策略 + 安全 + 中文选不到根因（commit 604bff1 / 398d0d8 / be5820b / f688676）",
+        "—— 以下为 v2.7 初始：",
         "BUG FIX: get_episode_info regex 不处理 None 值 — pdst.fm RSS 的 episode_url/duration_seconds 经常是 None，导致 regex 解析失败，整个 episode 信息返回空 → 转录 fallback 失败",
         "症状: 8:00 daily 选 Diary of a CEO (pdst.fm 跳转链)，audio_url 在 db 但 get_episode_info 返回全 None，bcut/jianying 不识别 pdst.fm 超时，Groq fallback 走不通",
         "修复: regex 改为 (None|'string') 三选一，episode_url/duration 为裸 None 时也能正确解析",
@@ -1288,19 +1298,29 @@ def transcribe_episode(ep: dict, output_dir: Path) -> Tuple[bool, str]:
 
     # v2.0 (2026-07-06): 小宇宙 + 有 Groq Key → 直接走 Groq，跳过 bcut/jianying
     # (bcut/jianying 对小宇宙直链超慢/失败，平均 1 小时+，而且 Vol.121 之前倒栽过)
+    # v2.8 (2026-08-10): 加 retry 3 次 + 10s/30s 退避，治 2026-08-09 Groq 403 Access denied 瞬时错误
+    # (丽哥指令：每天必须 5 集)
     if is_xiaoyuzhou and GROQ_API_KEY:
         log(f"    🎙️ 小宇宙链接，跳过 bcut 直走 Groq...")
         safe_title = sanitize_fn(title or ep['title'])[:40]
         output_path = output_dir / f"{podcast_name}_{safe_title}_groq.md"
-        success, result = transcribe_with_groq_url(episode_url, title or ep['title'], output_path, published_at=published_at)
-        if success:
-            return True, result
-        log(f"    ❌ Groq (小宇宙) 失败: {result}")
+        result = None
+        for _attempt in (1, 2, 3):
+            success, result = transcribe_with_groq_url(episode_url, title or ep['title'], output_path, published_at=published_at)
+            if success:
+                return True, result
+            if _attempt < 3:
+                _wait = 10 if _attempt == 1 else 30
+                log(f"    ⚠️ Groq (小宇宙) 第 {_attempt} 次失败: {result}，等待 {_wait}s 重试...")
+                import time as _t
+                _t.sleep(_wait)
+        log(f"    ❌ Groq (小宇宙) 重试 3 次仍失败: {result}")
         return False, result
 
     # v2.0 (2026-07-06): 喜马拉雅/非主流 RSS 源 → 跳过 bcut 直走 Groq (audio_url 路径)
     # 原因: bcut/jianying 对喜马拉雅直链/其他 RSS 超慢/从不返回
     # 8:30 cron 卡 7 小时就是因为 AI炼金术(喜马拉雅) 走 bcut
+    # v2.8 (2026-08-10): 加 retry 3 次 + 10s/30s 退避
     is_ximalaya = audio_url and "ximalaya" in audio_url
     if is_ximalaya and GROQ_API_KEY:
         log(f"    🎙️ 喜马拉雅链接，跳过 bcut 直走 Groq...")
@@ -1309,11 +1329,18 @@ def transcribe_episode(ep: dict, output_dir: Path) -> Tuple[bool, str]:
         language = "en" if podcast_name in {"Lex Fridman Podcast", "Founders", "Acquired",
                                               "All-In", "The Knowledge Project", "Dwarkesh Podcast",
                                               "Huberman Lab", "Hard Fork", "Diary of a CEO"} else "zh"
-        success, result = transcribe_with_groq_audio_url(audio_url, title or ep['title'],
-                                                          output_path, language=language, published_at=published_at)
-        if success:
-            return True, result
-        log(f"    ❌ Groq (喜马拉雅直链) 失败: {result}")
+        result = None
+        for _attempt in (1, 2, 3):
+            success, result = transcribe_with_groq_audio_url(audio_url, title or ep['title'],
+                                                              output_path, language=language, published_at=published_at)
+            if success:
+                return True, result
+            if _attempt < 3:
+                _wait = 10 if _attempt == 1 else 30
+                log(f"    ⚠️ Groq (喜马拉雅) 第 {_attempt} 次失败: {result}，等待 {_wait}s 重试...")
+                import time as _t
+                _t.sleep(_wait)
+        log(f"    ❌ Groq (喜马拉雅直链) 重试 3 次仍失败: {result}")
         return False, result
 
     # v2.7 (2026-07-24): pdst.fm / 其他非主流 RSS → 跳过 bcut 直走 Groq
@@ -2243,6 +2270,72 @@ def main():
         log(f"\n⚠️ 失败节目 ({len(failed)}):")
         for ep in failed:
             log(f"   - {ep['podcast']} — {ep['title']}")
+
+    # v2.8 (2026-08-10): 丽哥指令：每天必须 5 集。若成功 < 5 且失败有 audio_url，
+    # 同进程内 retry 1 次（走 Groq audio_url，绕开 bcut/jianying），治 Groq 403/SSL 瞬时错误
+    # (2026-08-09 案例：3/5 成功，2 集被 Groq 403 毁掉；现在是同进程 retry + 30s 退避)
+    if failed and len(successful) < MAX_EPISODES:
+        import time as _t
+        _EN_PODCASTS = {"Lex Fridman Podcast", "Founders", "Acquired", "All-In",
+                        "The Knowledge Project", "Dwarkesh Podcast", "Huberman Lab",
+                        "Hard Fork", "Diary of a CEO"}
+        log(f"\n🔁 兜底 retry: {len(failed)} 集失败重试 (走 Groq audio_url)...")
+        _still_failed = []
+        for ep in list(failed):  # 用副本遍历，允许 remove
+            try:
+                _audio_url, _episode_url, _title, _duration, _pub = get_episode_info(ep['podcast'], None)
+                if not _audio_url:
+                    log(f"   ⏭️ {ep['podcast']} 无 audio_url，跳过 retry")
+                    _still_failed.append(ep)
+                    continue
+                log(f"   ⏳ {ep['podcast']} — 等 30s 让 Groq 喘口气...")
+                _t.sleep(30)
+                _lang = "en" if ep['podcast'] in _EN_PODCASTS else "zh"
+                _ep_dir = day_root / _safe_podcast_dirname(ep['podcast'])
+                _ep_dir.mkdir(parents=True, exist_ok=True)
+                _out = _ep_dir / f"{ep['podcast']}_{sanitize_fn(ep['title'])[:40]}_groq_retry.md"
+                _ok, _result = transcribe_with_groq_audio_url(
+                    _audio_url, ep['title'], _out, language=_lang, published_at=_pub
+                )
+                if _ok:
+                    _final = _ep_dir / f"{ep['podcast']}_{sanitize_fn(ep['title'])}_全文稿.md"
+                    shutil.copy2(_out, _final)
+                    merge_transcript_file(_final)
+                    _notes = generate_all_notes(_final, ep['podcast'], ep['title'], _ep_dir)
+                    if _notes:
+                        successful.append({'podcast': ep['podcast'], 'title': ep['title'],
+                                           'transcript': _final, 'notes': _notes})
+                        failed.remove(ep)
+                        log(f"   ✅ {ep['podcast']} retry 成功（{len(_notes)} 篇笔记）")
+                    else:
+                        log(f"   ⚠️ {ep['podcast']} retry 转录成功但笔记失败")
+                        _still_failed.append(ep)
+                else:
+                    log(f"   ❌ {ep['podcast']} retry 仍失败: {_result}")
+                    _still_failed.append(ep)
+            except Exception as e:
+                log(f"   ❌ {ep['podcast']} retry 异常: {e}")
+                _still_failed.append(ep)
+        log(f"\n📊 兜底后: 成功 {len(successful)}/{len(selected)} 集 (失败 {len(_still_failed)})")
+        if _still_failed:
+            log(f"⚠️ 仍失败 ({len(_still_failed)}):")
+            for ep in _still_failed:
+                log(f"   - {ep['podcast']} — {ep['title']}")
+            # 把兜底也失败的信息写 state，便于 07:00 报告标记
+            try:
+                _state_dir = Path("/root/.openclaw/workspace/state/podcast-bridge")
+                _state_dir.mkdir(parents=True, exist_ok=True)
+                _state_dir.joinpath(f"unfilled_{today}.json").write_text(
+                    json.dumps({
+                        "date": today,
+                        "target": MAX_EPISODES,
+                        "successful": len(successful),
+                        "still_failed": [_e.get('podcast', '?') for _e in _still_failed],
+                    }, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     import argparse
