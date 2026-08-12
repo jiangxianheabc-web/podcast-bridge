@@ -148,6 +148,19 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict
 
+# 🆕 2026-08-12 P0#4.5 Phase 2: 接入 circuit breaker
+# podcast-bridge 是 sub-repo, circuit_breaker 在 workspace scripts/ 里。
+# 用绝对路径定位, 避免 sub-repo 之间相对路径退化。
+_CB_DIR = "/root/.openclaw/workspace/scripts"
+if _CB_DIR not in sys.path:
+    sys.path.insert(0, _CB_DIR)
+try:
+    from circuit_breaker import CircuitBreaker, cb_summary
+except ImportError:
+    # Circuit Breaker 不可用时不阻断 (fail-open)
+    CircuitBreaker = None
+    cb_summary = lambda: {}
+
 # 配置
 SKILL_DIR = Path("/root/.openclaw/workspace/skills/podcast-bridge")
 OUTPUT_BASE = Path("/mnt/c/Users/lili/Documents/LILINotes/播客转录")
@@ -1523,6 +1536,14 @@ def _groq_chat(user_prompt: str, system_prompt: str = LLM_SYSTEM_PROMPT,
     注：函数名仍为 _groq_chat 是为了不破坏 4 个 gen_* 函数调用点"""
     global _use_minimax_as_primary
 
+    # 🆕 2026-08-12 P0#4.5 Phase 2: circuit breaker 闸门 (groq)
+    # 只对 groq 路径生效; primary 走 minimax-portal 时跳过该闸
+    if CircuitBreaker is not None and not _use_minimax_as_primary:
+        _cb_groq = CircuitBreaker("groq")
+        if _cb_groq.is_open():
+            log("    ⏭️ circuit breaker open (groq), fallback minimax-portal")
+            return _minimax_chat(user_prompt, system_prompt, max_tokens)
+
     # 2026-07-03：默认走 minimax-portal
     if _use_minimax_as_primary:
         return _minimax_chat(user_prompt, system_prompt, max_tokens)
@@ -1563,10 +1584,28 @@ def _groq_chat(user_prompt: str, system_prompt: str = LLM_SYSTEM_PROMPT,
                 )
                 refined = resp.choices[0].message.content.strip()
                 if len(refined) > 30:
+                    # 🆕 2026-08-12 P0#4.5 Phase 2: 成功调用后记录
+                    if CircuitBreaker is not None:
+                        try:
+                            CircuitBreaker("groq").record_success()
+                        except Exception:
+                            pass
                     return (refined, m)
                 log(f"    ⚠️ {m} 返回内容过短，重试")
+                # 🆕 2026-08-12 P0#4.5 Phase 2: 输出不达标计失败
+                if CircuitBreaker is not None:
+                    try:
+                        CircuitBreaker("groq").record_failure("output_too_short")
+                    except Exception:
+                        pass
             except Exception as e:
                 err_str = str(e)
+                # 🆕 2026-08-12 P0#4.5 Phase 2: 异常路径累计失败
+                if CircuitBreaker is not None:
+                    try:
+                        CircuitBreaker("groq").record_failure(err_str[:200])
+                    except Exception:
+                        pass
                 if "rate_limit_exceeded" in err_str or "413" in err_str or "TPM" in err_str:
                     log(f"    ⏳ {m} TPM 限流")
                     if m == GROQ_LLM_MODEL and m != GROQ_FALLBACK_MODEL:
@@ -1600,6 +1639,13 @@ def _minimax_chat(user_prompt: str, system_prompt: str = LLM_SYSTEM_PROMPT,
     返回 (text, model) tuple；失败返回 None
     2026-07-03: Groq 401 后启用"""
     import time, json, urllib.request, urllib.error
+    # 🆕 2026-08-12 P0#4.5 Phase 2: circuit breaker 闸门 (minimax-portal)
+    if CircuitBreaker is not None:
+        _cb_mm = CircuitBreaker("minimax-portal")
+        if _cb_mm.is_open():
+            log(f"    ⏭️ circuit breaker open (minimax-portal), 跳过调用")
+            return None
+
     access = _get_minimax_token()
     if not access:
         log("    ⚠️ minimax-portal token 未找到")
@@ -1635,11 +1681,29 @@ def _minimax_chat(user_prompt: str, system_prompt: str = LLM_SYSTEM_PROMPT,
                         text += block.get("text", "")
                 text = text.strip()
                 if len(text) > 30:
+                    # 🆕 2026-08-12 P0#4.5 Phase 2: minimax-portal 成功记录
+                    if CircuitBreaker is not None:
+                        try:
+                            CircuitBreaker("minimax-portal").record_success()
+                        except Exception:
+                            pass
                     return (text, MINIMAX_MODEL)
                 log(f"    ⚠️ {MINIMAX_MODEL} 返回内容过短，重试")
+                # 🆕 2026-08-12 P0#4.5 Phase 2: minimax-portal 输出不达标计失败
+                if CircuitBreaker is not None:
+                    try:
+                        CircuitBreaker("minimax-portal").record_failure("output_too_short")
+                    except Exception:
+                        pass
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8")[:300]
             log(f"    ⚠️ {MINIMAX_MODEL} HTTP {e.code}: {err_body}")
+            # 🆕 2026-08-12 P0#4.5 Phase 2: minimax-portal HTTP 异常记录
+            if CircuitBreaker is not None:
+                try:
+                    CircuitBreaker("minimax-portal").record_failure(f"HTTP {e.code}: {err_body[:150]}")
+                except Exception:
+                    pass
             if e.code == 429:
                 if attempt < 2:
                     wait_sec = 30
@@ -2336,6 +2400,21 @@ def main():
                 )
             except Exception:
                 pass
+
+    # 🆕 2026-08-12 P0#4.5 Phase 2: 末尾 append cb_summary() (供 T18b 报告读取)
+    try:
+        if cb_summary is not None:
+            _cb_log_path = Path("/root/.openclaw/workspace/state/circuit-breaker-history.jsonl")
+            _cb_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with _cb_log_path.open("a", encoding="utf-8") as _fh:
+                _fh.write(json.dumps({
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "source": "podcast-bridge.daily_podcast_digest_v2.main",
+                    "summary": cb_summary(),
+                }, ensure_ascii=False) + "\n")
+    except Exception as _cb_err:
+        log(f"cb_summary 附加失败（不影响主流程）: {_cb_err}")
+
 
 if __name__ == "__main__":
     import argparse
