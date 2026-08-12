@@ -1494,16 +1494,35 @@ MINIMAX_MAX_TOKENS = 2500  # M2.7-highspeed 会带 thinking block吃掉一些 to
 MINIMAX_CONTEXT_CHARS = 6000  # M2.7-highspeed 上下文更长，可吃到 6k
 
 def _get_minimax_token():
-    """从 OpenClaw auth-profiles 读 minimax-portal access token"""
-    import json
-    auth_path = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "auth-profiles.json"
-    if not auth_path.exists():
-        return None
-    try:
-        data = json.loads(auth_path.read_text(encoding="utf-8"))
-        return data.get("profiles", {}).get("minimax-portal:default", {}).get("access")
-    except Exception:
-        return None
+    """从 OpenClaw 主 agent 的 SQLite auth store 读 minimax-portal access token.
+
+    Round-3 fix (8-12 bug): 之前路径找 ~/.openclaw/agents/main/agent/auth-profiles.json
+    但实际 OpenClaw v2+ 用 sqlite 存储：~/.openclaw/agents/main/agent/openclaw-agent.sqlite
+    表 auth_profile_store, store_key='primary', profiles['minimax-portal:default']['access'].
+
+    Plus: cron 跑时 HOME 可能为空, 加 /root 绝对路径 fallback 防 Path.home() 返回空。
+    """
+    import sqlite3, json
+    candidates = [
+        Path.home() / ".openclaw" / "agents" / "main" / "agent" / "openclaw-agent.sqlite",
+        Path("/root/.openclaw/agents/main/agent/openclaw-agent.sqlite"),  # cron HOME=空 fallback
+    ]
+    for db_path in candidates:
+        if not db_path.exists():
+            continue
+        try:
+            con = sqlite3.connect(str(db_path))
+            r = con.execute(
+                'SELECT store_json FROM auth_profile_store WHERE store_key="primary"'
+            ).fetchone()
+            if r:
+                data = json.loads(r[0])
+                token = data.get("profiles", {}).get("minimax-portal:default", {}).get("access")
+                if token:
+                    return token
+        except Exception:
+            continue
+    return None
 
 # Session 级降级标志：70b 限流一次后本轮后续所有调用直接用 8b（避免 20 次重试 70b）
 _degraded_to_8b = False
