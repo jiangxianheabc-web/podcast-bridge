@@ -144,6 +144,7 @@ import time
 import shutil
 import re
 import tempfile
+import html
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict
@@ -1454,6 +1455,18 @@ def sanitize_fn(name: str) -> str:
     name = name.strip().strip(".")
     return name[:80] or "podcast"
 
+# 🆕 2026-08-13 subagent batch 2 #4: 防 markdown injection
+# 原任务: bleach.clean(text, tags=['b', 'i', 'code', 'pre'])
+# 实际: bleach 不在 deps (requirements.txt 明确零依赖), html.escape() (stdlib) 达同样安全目标
+# html.escape 转义 <, >, &, ", ' → 阻断 <script>/<iframe>/onerror= 等 HTML/JS 注入
+# Markdown 语法 (*, _, #, [], (), etc.) 不受影响, Obsidian 仍正常渲染
+def sanitize_llm_text(text: str) -> str:
+    """LLM 输出转义: 防止 markdown/HTML injection.
+
+    替代 bleach.clean(text, tags=['b', 'i', 'code', 'pre']) — stdlib html.escape 等价安全.
+    """
+    return html.escape(text, quote=True)
+
 # ============== 笔记生成 ==============
 
 def extract_clean_content(transcript_text: str) -> str:
@@ -1775,6 +1788,7 @@ def gen_product(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 产品洞察生成失败")
         return None
     text, used_model = result
+    text = sanitize_llm_text(text)  # 🆕 2026-08-13: 防 markdown injection
     # 🆕 2026-07-27 Security: sanitize podcast name to prevent path traversal
     safe_podcast = sanitize_fn(podcast)
     path = output_dir / f"{safe_podcast}_产品洞察.md"
@@ -1830,6 +1844,7 @@ def gen_structured(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 结构化笔记生成失败")
         return None
     text, used_model = result
+    text = sanitize_llm_text(text)  # 🆕 2026-08-13: 防 markdown injection
     # SecV3 (2026-07-28): podcast/title 都过 sanitize_fn，防止 path 拼接逃逸 output_dir
     safe_podcast = sanitize_fn(podcast)
     safe_title = sanitize_fn(title)[:60]
@@ -1890,6 +1905,7 @@ def gen_deep(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 深度笔记生成失败")
         return None
     text, used_model = result
+    text = sanitize_llm_text(text)  # 🆕 2026-08-13: 防 markdown injection
     # SecV3 (2026-07-28): podcast/title 都过 sanitize_fn，防止 path 拼接逃逸 output_dir
     safe_podcast = sanitize_fn(podcast)
     safe_title = sanitize_fn(title)[:60]
@@ -1953,6 +1969,7 @@ def gen_investment(content: str, podcast: str, title: str, duration: str,
         log("    ⚠️ 投资分析生成失败")
         return None
     text, used_model = result
+    text = sanitize_llm_text(text)  # 🆕 2026-08-13: 防 markdown injection
     # SecV3 (2026-07-28): podcast/title 都过 sanitize_fn，防止 path 拼接逃逸 output_dir
     safe_podcast = sanitize_fn(podcast)
     safe_title = sanitize_fn(title)[:60]
