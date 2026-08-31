@@ -2197,6 +2197,9 @@ def refresh_rss_db(subscriptions: list, force: bool = False) -> int:
     chinese_subs = [s for s in subscriptions if is_chinese_podcast(s['name'])]
     log(f"  需 sync: {len(chinese_subs)} 个中文订阅")
     synced = 0
+    # 🆕 2026-08-31: 记录失败订阅名 + reason，便于排查 "RSS refresh 48/49" 类 silent fail
+    fail_records: list[dict] = []
+    fail_state_dir = Path("/root/.openclaw/workspace/state/podcast-bridge")
     for sub in chinese_subs:
         try:
             r = subprocess.run(
@@ -2205,8 +2208,32 @@ def refresh_rss_db(subscriptions: list, force: bool = False) -> int:
             )
             if r.returncode == 0:
                 synced += 1
-        except (subprocess.TimeoutExpired, Exception):
-            continue
+            else:
+                fail_records.append({
+                    "name": sub['name'],
+                    "reason": f"returncode={r.returncode}",
+                    "stderr_tail": (r.stderr or "")[-160:].strip(),
+                })
+        except subprocess.TimeoutExpired:
+            fail_records.append({"name": sub['name'], "reason": "timeout_8s"})
+        except Exception as e:
+            fail_records.append({"name": sub['name'], "reason": f"exception: {e!r}"[:160]})
+    # 写失败记录到 state/podcast-bridge/rss_fail_YYYY-MM-DD.json (overwrite 模式)
+    if fail_records:
+        try:
+            fail_state_dir.mkdir(parents=True, exist_ok=True)
+            fail_file = fail_state_dir / f"rss_fail_{datetime.now().strftime('%Y-%m-%d')}.json"
+            payload = {
+                "date": datetime.now().strftime('%Y-%m-%d'),
+                "synced": synced,
+                "total": len(chinese_subs),
+                "failed_count": len(fail_records),
+                "fails": fail_records,
+            }
+            fail_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+            log(f"  ⚠️ RSS refresh 失败 {len(fail_records)} 个，已记录: {fail_file}")
+        except Exception as e:
+            log(f"  ⚠️ RSS refresh 失败记录写入异常: {e}")
     log(f"  ✅ RSS refresh 完成: {synced}/{len(chinese_subs)}")
     return synced
 
