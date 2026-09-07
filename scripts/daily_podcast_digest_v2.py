@@ -39,9 +39,21 @@
 DOCS_SNAPSHOT = {
     "schema_version": 1,
     "script": "skills/podcast-bridge/scripts/daily_podcast_digest_v2.py",
-    "version": "v2.7.3",
-    "updated": "2026-07-29",
+    "version": "v2.9",
+    "updated": "2026-09-07",
     "owner": "Claw + 丽哥",
+    "changes_v29": [
+        "v2.9 (2026-09-07): picker dedupe + stale-vs-fail warning (commit 1b3a147)",
+        "BUG FIX: select_episodes 主循环跨 category 重复 picked 同一播客",
+        "症状: 硬地骇客 同时在 tech_product + health_science 两个 category, 主循环用 used_categories 标记 category 但不按 podcast name 去重, 导致同一集被 selected.append() 2 次",
+        "根因: 主循环 line 540 漏了 fallback 循环 line 583 那条 'if any(s[\"podcast\"] == name for s in selected): continue'",
+        "案例: 9-03 picked=5 但 unique=4 (硬地骇客 EP129 重复 1 次), 浪费 1 槽位, 真正缺 1 集 (纵横四海 EP033 洗浴经济)",
+        "修复: select_episodes 主循环 line 545 加按 podcast name 去重 (与 fallback 一致)",
+        "NEW: 当 selected < MAX_EPISODES 时显式区分 '候选池不足' vs '转录失败'",
+        "实现: main() line 2298+, 当 unique_stale >= 3 时输出 '⚠️ 候选池警告: N 个 stale source 限制了候选 (非转录失败, 不需要 backfill)'",
+        "动机: 之前日志统一报 '成功: N/M' 看不出是 picker 限制还是真失败, 9-07 我误以为 7 集要 backfill, 实际只缺 1 集",
+        "验证: dedupe 单元测试 (硬地骇客 2 个 category 只 picked 1 次), stale warning 单元测试 (输出 '候选池警告' 段)",
+    ],
     "changes_v27": [
         "v2.7.3 (2026-07-28): text_sim 算法升级 + is_recently_picked 默认值修复（commit 3570504）",
         "  - text_sim: 字符集 jaccard + 偏移，中文 ASR 错字 0.04 → 0.71",
