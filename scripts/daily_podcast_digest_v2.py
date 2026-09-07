@@ -541,6 +541,12 @@ def select_episodes(subscriptions):
                 break
             if podcast_name not in sub_map:
                 continue
+            # v2.9 (2026-09-07): 主循环按 podcast name 去重 (修复 9-03 picker bug)
+            # 硬地骇客 同时在 tech_product + health_science 两个 category,
+            # 主循环只用 used_categories 标记 category, 不按 podcast 去重,
+            # 导致同一播客的同一集被 selected.append() 2 次, picked 数 = 5 但 unique = 4
+            if any(s['podcast'] == podcast_name for s in selected):
+                continue
             # v2.0 (2026-07-06): last_picked 黑名单
             # 2026-07-21 丽哥要求: 放宽黑名单，最近 2 天才硬过滤
             # 之前 days=4 太严，导致 7 天 backfill 几乎只能选英文/冷门
@@ -2291,6 +2297,18 @@ def main():
     log(f"\n🎯 已挑选 {len(selected)} 集中文播客:\n")
     for ep in selected:
         log(f"  [{ep['category']}] {ep['podcast']} — {ep['title']}")
+
+    # v2.9 (2026-09-07): 当 selected < MAX_EPISODES 时, 区分 "候选池不足" vs "转录失败"
+    # 之前日志统一报 "成功: N/M" 看不出是 picker 限制还是真失败, 丽哥 9-07 误以为 7 集要 backfill
+    if len(selected) < MAX_EPISODES:
+        from collections import Counter
+        unique_stale = len(set(s['podcast'] for s in STALE_SOURCES)) if STALE_SOURCES else 0
+        if unique_stale >= 3:
+            log(f"\n⚠️ 候选池警告: {unique_stale} 个 stale source 限制了候选")
+            log(f"   今天只能挑 {len(selected)} unique 集 (非转录失败, 不需要 backfill)")
+            log(f"   07:00 报告会标记为 '候选池不足' 而非 '转录失败'")
+        else:
+            log(f"\n⚠️ 候选池警告: 只挑到 {len(selected)} 集, stale 源仅 {unique_stale} 个, 建议查 picker 逻辑")
 
     # v2.5 (2026-07-23): 输出 staleness 汇总到 state 文件，供 07:00 报告读取
     if STALE_SOURCES:
