@@ -2256,6 +2256,116 @@ def refresh_rss_db(subscriptions: list, force: bool = False) -> int:
     return synced
 
 
+def _pick_backfill_episode(selected_episodes: list, available_subs: list, max_date: str = None) -> dict | None:
+    """
+    v2.10 (2026-09-08) F1+F3 backfill: 当 selected 不足 MAX_EPISODES 时, 自动找老节目补齐.
+
+    路径:
+      F1 主: 看 selected 的 category 分布 → 缺哪类 → 从该类所有订阅找最新未转录 episode (pub_date ≤ MAX_EPISODE_AGE_DAYS)
+      F3 fallback: 若 F1 没找到, 限定从 9 个 94a60cd 新源找
+
+    参数:
+      selected_episodes: 今天已选的 episodes (list of dict, 含 'podcast'/'title'/'category')
+      available_subs: 完整订阅列表 (SQLite; list of dict, 含 'name'/'rss_url'/'category')
+      max_date: 截止日期 yyyy-MM-dd (默认今天, 已选集往后不会再被挑)
+
+    返回: 选中的 episode dict (含 podcast/title/audio_url/published_at/category/episode_id) 或 None
+
+    跳过规则:
+      - transcript_path='skip' 黑名单 (标"不转录")
+      - audio_url 缺失
+      - pub_date > MAX_EPISODE_AGE_DAYS (默认 60 天)
+      - 今天 selected 里已选 (podcast+title 双匹配)
+      - is_recently_picked (默认 3 天黑名单)
+
+    设计依据: /tmp/20260908-future-5ep-design.md (丽哥拍板 F1+F3)
+    """
+    import sqlite3 as _sqlite3
+
+    if max_date is None:
+        max_date = datetime.now().strftime("%Y-%m-%d")
+
+    # 收集今天 selected 的 category 分布 (排除 None/空/'none')
+    today_categories = {ep.get('category') for ep in selected_episodes
+                        if ep.get('category') and ep.get('category') != 'none'}
+
+    # 9 个 94a60cd 新源 (F3 fallback — 修根因后这 9 个会进候选池)
+    NEW_9_SOURCES = {
+        "半拿铁·周刊", "商业就是这样", "FUND财经早班车", "声动早班车",
+        "大内密谈", "故事FM", "博物志", "文化有限", "杯弓舌瘾"
+    }
+
+    db_path = SKILL_DIR / "podcast_library" / "library.sqlite3"
+    if not db_path.exists():
+        return None
+
+    # 已有 selected 的 (podcast, title) 集合
+    selected_set = {(s.get('podcast', ''), s.get('title', '')) for s in selected_episodes}
+
+    candidates = []
+    try:
+        conn = _sqlite3.connect(str(db_path))
+        for sub in available_subs:
+            name = sub.get('name', '')
+            if not name:
+                continue
+            # 黑名单: 最近 picked 跳过
+            try:
+                if is_recently_picked(name):
+                    continue
+            except Exception:
+                pass
+            # SQL 取该 sub 最近 5 个 episode (按 published_at DESC, NULL 排后)
+            rows = conn.execute("""
+                SELECT e.id, e.title, e.audio_url, e.published_at, e.transcript_path
+                FROM episodes e
+                JOIN subscriptions s ON e.subscription_id = s.id
+                WHERE s.name = ?
+                  AND e.audio_url IS NOT NULL AND e.audio_url != ''
+                ORDER BY COALESCE(e.published_at, '') DESC, e.id DESC
+                LIMIT 5
+            """, (name,)).fetchall()
+            for row in rows:
+                ep_id, title, audio_url, pub, tp = row
+                if not audio_url or not audio_url.strip():
+                    continue
+                if tp and tp.strip() == "skip":
+                    continue
+                if pub and is_stale_episode(pub, max_age_days=MAX_EPISODE_AGE_DAYS):
+                    continue
+                if (name, title) in selected_set:
+                    continue
+                candidates.append({
+                    'podcast': name,
+                    'title': title,
+                    'audio_url': audio_url,
+                    'published_at': pub or '',
+                    'category': sub.get('category') or 'none',
+                    'episode_id': ep_id,
+                })
+        conn.close()
+    except Exception as e:
+        log(f"⚠️ _pick_backfill_episode SQL 失败: {e}")
+        return None
+
+    if not candidates:
+        return None
+
+    # F1 主: 同 category 匹配 (仅在 selected 有真 category 时启用)
+    if today_categories:
+        for ep in candidates:
+            if ep['category'] in today_categories:
+                return ep
+
+    # F3 fallback: 9 个 94a60cd 新源 (修根因后即可用)
+    for ep in candidates:
+        if ep['podcast'] in NEW_9_SOURCES:
+            return ep
+
+    # F2 兜底: 任意未转录 (隐含按 published_at DESC)
+    return candidates[0]
+
+
 def main():
     today = os.environ.get("PODCAST_BACKFILL_DATE") or datetime.now().strftime("%Y-%m-%d")
     year_month = today[:7]  # "2026-07"
@@ -2493,6 +2603,67 @@ def main():
                 )
             except Exception:
                 pass
+
+    # v2.10 (2026-09-08): F1+F3 backfill — 候选池不足时自动补齐老节目
+    # 触发: 兜底 retry 后仍 len(successful) < MAX_EPISODES
+    # 路径: F1 主 (同 category) → F3 fallback (9 个 94a60cd 新源) → F2 兜底 (任意未转录)
+    # 设计: /tmp/20260908-future-5ep-design.md (丽哥 9-08 20:00 拍板)
+    if len(successful) < MAX_EPISODES:
+        _short = MAX_EPISODES - len(successful)
+        log(f"\n🔄 候选池仍不足 {_short} 集, 启动 F1+F3 backfill...")
+        _all_subs_for_backfill = load_subscriptions()
+        _backfill = _pick_backfill_episode(
+            selected_episodes=selected,
+            available_subs=_all_subs_for_backfill,
+            max_date=today,
+        )
+        if _backfill:
+            log(f"   🎯 F1/F3 命中: {_backfill['podcast']} — {_backfill['title'][:50]}")
+            _ep_dir = day_root / _safe_podcast_dirname(_backfill['podcast'])
+            _ep_dir.mkdir(parents=True, exist_ok=True)
+            _tmp_dir = Path(f"/tmp/podcast_digest_{today}_backfill_{_safe_podcast_dirname(_backfill['podcast'])[:30]}")
+            _tmp_dir.mkdir(parents=True, exist_ok=True)
+            _success, _result = transcribe_episode(_backfill, _tmp_dir)
+            if _success:
+                log(f"   ✅ backfill 转录完成")
+                try:
+                    _src = Path(_result)
+                    _dst = _ep_dir / f"{_backfill['podcast']}_{sanitize_fn(_backfill['title'])}_全文稿.md"
+                    shutil.copy2(_src, _dst)
+                    merge_transcript_file(_dst)
+                    _transcript = _dst
+                except Exception as _e:
+                    log(f"   ⚠️ 复制/合并失败: {_e}")
+                    _transcript = Path(_result)
+                _notes = generate_all_notes(_transcript, _backfill['podcast'], _backfill['title'], _ep_dir)
+                if _notes:
+                    for _name, _path in _notes.items():
+                        log(f"      ✅ {_name}: {_path.name}")
+                    successful.append({
+                        'podcast': _backfill['podcast'],
+                        'title': _backfill['title'],
+                        'transcript': _transcript,
+                        'notes': _notes,
+                    })
+                    # 重新归档 + sync (让 daily note 含 backfill 集)
+                    try:
+                        archive_to_obsidian(today, successful, day_root)
+                        sync_to_daily_note(today, successful, day_root)
+                        record_picked(successful, today)
+                    except Exception as _e:
+                        log(f"   ⚠️ backfill 归档/sync 失败: {_e}")
+                    log(f"   🎉 backfill 凑齐: {len(successful)}/{MAX_EPISODES} 集")
+                else:
+                    log(f"   ⚠️ backfill 转录成功但笔记失败")
+                    try:
+                        if _ep_dir.exists() and not any(_ep_dir.iterdir()):
+                            _ep_dir.rmdir()
+                    except OSError:
+                        pass
+            else:
+                log(f"   ❌ backfill 转录失败: {_result}")
+        else:
+            log(f"   ⚠️ 无 backfill 候选, 维持 {len(successful)}/{MAX_EPISODES}")
 
     # 🆕 2026-08-12 P0#4.5 Phase 2: 末尾 append cb_summary() (供 T18b 报告读取)
     try:
