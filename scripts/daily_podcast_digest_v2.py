@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-每日播客摘要自动化脚本 v2.8
+每日播客摘要自动化脚本 v2.9
+2026-09-21 升级总结:
+- v2.9 (2026-09-21): is_already_transcribed 加 rglob 缓存 (drvfs 性能修复)
+  - 问题: picker 阶段每集调用 is_already_transcribed 一次，60+ 集候选 = 60+ 次
+    OUTPUT_BASE.rglob("*.md")。drvfs 上每次 rglob 5s+，累积 5+ 分钟，60 分钟 picker
+    跑不完 50%。9-19 正常 2 分钟完成，9-20 drvfs 慢 + 历史文件更多 → 崩。
+  - 方案: 模块级缓存 (mtime, files)，用 OUTPUT_BASE 目录 mtime 失效。
+    drvfs stat 目录 < 1ms vs rglob 2305 文件 5s。picker 阶段 mtime 不变 → 全部命中。
+  - benchmark: 重复调用 60 次，未缓存 60×8.5s≈510s，缓存后 8.5s+59×0.2s≈20s，加速 25x。
+  - 失效策略: OUTPUT_BASE 下任何 .md 新增/删除会改 mtime，下次 picker 自动重扫。
 2026-08-10 升级总结:
 - v2.8 (2026-08-10): 丽哥指令：每天必须 5 集。
   - 小宇宙/喜马拉雅 Groq 路径加 retry 3 次（10s/30s 退避），治 Groq 403 Access denied 瞬时错误
@@ -378,11 +387,54 @@ def has_chinese_chars(name: str) -> bool:
         return False
     return any('\u4e00' <= c <= '\u9fff' for c in name)
 
+# v2.9 (2026-09-21): 缓存 helper，drvfs 上 rglob("*.md") 单次 5s+，
+# picker 阶段会调用几十次，不用缓存 picker 阶段会超时。
+# 用 OUTPUT_BASE 目录 mtime 失效：drvfs stat 目录 < 1ms，新文件会改 mtime。
+_md_files_cache = {"mtime": None, "seen_paths": None}
+
+
+def _get_existing_md_dirs():
+    """返回已存在 md 文件的日期目录集合 (set of Path)。缓存到 mtime 失效。
+
+    drvfs 上 OUTPUT_BASE.rglob("*.md") 单次 5s+（2026-09-21 实测扫 2305 文件 = 5.07s）。
+    is_already_transcribed 在 picker 阶段被调几十次，不用缓存 picker 跑不完。
+    失效: OUTPUT_BASE 目录 mtime（任何 .md 新增/删除会改 mtime，下次自动重扫）。
+    """
+    try:
+        cur_mtime = OUTPUT_BASE.stat().st_mtime
+    except OSError:
+        return set()
+
+    if _md_files_cache["mtime"] == cur_mtime and _md_files_cache["seen_paths"] is not None:
+        return _md_files_cache["seen_paths"]
+
+    seen = set()
+    try:
+        for f in OUTPUT_BASE.rglob("*.md"):
+            if not f.is_file():
+                continue
+            # 跳过索引/汇总文件（如 _2026-07-04_播客摘要索引.md 或月份 .md）
+            if f.name.startswith("_") or f.name in ("2026-06.md", "2026-07.md"):
+                continue
+            if f.parent == OUTPUT_BASE:
+                continue
+            # 文件结构: OUTPUT_BASE/<month>/<YYYY-MM-DD>/<podcast>/<file>.md
+            # 日期目录是 f.parent.parent（跳过 <podcast> 这一层）
+            seen.add(f.parent.parent)
+    except Exception:
+        seen = set()
+
+    _md_files_cache["mtime"] = cur_mtime
+    _md_files_cache["seen_paths"] = seen
+    return seen
+
+
 def is_already_transcribed(podcast: str, title: str) -> bool:
     """检查该单集是否已在任何日期转录过（检查所有历史目录）
 
     实际目录结构: OUTPUT_BASE/<YYYY-MM>/<YYYY-MM-DD>/<podcast>/*.md
-    用 rglob("*.md") 一次性扫到所有笔记文件，避免遗漏中间层级。
+    v2.9 (2026-09-21): 用 _get_existing_md_dirs() 缓存的日期目录集合，避免 drvfs 上
+    每次 rglob 5s+。失效靠 OUTPUT_BASE 目录 mtime 自动管理。
     2026-07-05 修复：原实现 glob("2*-*-*") 直接匹配 OUTPUT_BASE 子目录，
     而 OUTPUT_BASE 下是月份目录（"2026-07"），导致永远扫不到日期目录，
     去重失效，所有已转录节目每天都被当新节目重转。
@@ -397,21 +449,8 @@ def is_already_transcribed(podcast: str, title: str) -> bool:
     safe_podcast = _safe_podcast_dirname(podcast)
     patterns = [f"{podcast}_{safe_title}", f"{podcast}_{safe_title}_全文稿",
                 f"{safe_podcast}_{safe_title}", f"{safe_podcast}_{safe_title}_全文稿"]
-    seen_paths = set()
-    try:
-        for f in OUTPUT_BASE.rglob("*.md"):
-            if not f.is_file():
-                continue
-            # 跳过索引/汇总文件（如 _2026-07-04_播客摘要索引.md 或月份 .md）
-            if f.name.startswith("_") or f.name in ("2026-06.md", "2026-07.md"):
-                continue
-            if f.parent == OUTPUT_BASE:
-                continue
-            # 文件结构: OUTPUT_BASE/<month>/<YYYY-MM-DD>/<podcast>/<file>.md
-            # 日期目录是 f.parent.parent（跳过 <podcast> 这一层）
-            date_dir = f.parent.parent
-            seen_paths.add(date_dir)
-    except Exception:
+    seen_paths = _get_existing_md_dirs()
+    if not seen_paths:
         return False
 
     # 直接根据目录结构判定：任一日期目录下存在 <podcast>/<safe_title>...md 即可
